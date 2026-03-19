@@ -1,0 +1,15 @@
+# Ignore the cloned reference repository
+VideoRAG/
+
+# Python environment & cache
+__pycache__/
+*.pyc
+.env
+venv/
+.ipynb_checkpoints/
+
+# Data & Models (Nên bỏ qua vì dung lượng lớn)
+*.mp4
+*.mkv
+models/
+output/
