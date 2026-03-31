@@ -1,5 +1,6 @@
 # Ignore the cloned reference repository
 VideoRAG/
+VEA_algo/modules/checkpoints/
 
 # Python environment & cache
 __pycache__/
