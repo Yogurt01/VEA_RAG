@@ -135,10 +135,26 @@ class VideoProcessor:
             logging.info("Loading Whisper model 'large-v2'")
             model = whisperx.load_model("large-v2", self.device, compute_type=self.compute_type)
             
-            if self.diarization_model == 'community-1':
-                diarize_model = DiarizationPipeline(model_name='pyannote/speaker-diarization-community-1', token=HUGGING_FACE_TOKEN, device=self.device)
-            elif self.diarization_model == 'precision-2':
-                diarize_model = DiarizationPipeline(model_name='pyannote/speaker-diarization-precision-2', token=PYANNOTEAI_API_KEY, device=self.device)
+            if self.diarization_model == "community-1":
+                if not HUGGING_FACE_TOKEN:
+                    raise RuntimeError(
+                        "HUGGING_FACE_TOKEN must be set for 'community-1' diarization_model"
+                    )
+                diarize_model = DiarizationPipeline(
+                    model_name="pyannote/speaker-diarization-community-1",
+                    token=HUGGING_FACE_TOKEN,
+                    device=self.device,
+                )
+            elif self.diarization_model == "precision-2":
+                if not PYANNOTEAI_API_KEY:
+                    raise RuntimeError(
+                        "PYANNOTEAI_API_KEY must be set for 'precision-2' diarization_model"
+                    )
+                diarize_model = DiarizationPipeline(
+                    model_name="pyannote/speaker-diarization-precision-2",
+                    token=PYANNOTEAI_API_KEY,
+                    device=self.device,
+                )
             else:
                 raise ValueError(f"Unknown diarization_model: {self.diarization_model}")
             

@@ -35,7 +35,7 @@ class CaptionExtractor:
                 if seg.get("caption", "").strip()
             ]
 
-            if len(edus) < args.min_edus:
+            if len(edus) < self.min_edus:
                 continue
 
             dataset.append({
