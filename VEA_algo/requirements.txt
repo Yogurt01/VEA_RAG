@@ -1,0 +1,17 @@
+torch~=2.8.0
+torchvision~=0.23.0
+torchaudio~=2.8.0
+transformers>=4.48.0
+whisperx==3.8.4
+
+pandas>=2.2.3
+numpy>=2.1.0
+opentelemetry-api<1.39.0
+opentelemetry-sdk<1.39.0
+
+git+https://github.com/MahmoudAshraf97/demucs.git
+librosa
+scenedetect[opencv]
+fiftyone
+decord
+qwen-vl-utils

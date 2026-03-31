@@ -9,74 +9,172 @@
 ## 📋 Table of Contents
 
 - [⚡ VEA_algo Framework](#-vea_algo-framework)
-- [🛠️ Installation](#️-installation)
-- [🚀 Quick Start](#-quick-start)
 
 ## ⚡ VEA_algo Framework
 
 VEA_algo is an advanced video processing pipeline that builds on the structural foundations of VideoRAG. It utilizes PySceneDetect to segment videos into coherent semantic scenes, then leverages **Qwen3-VL-2B-Instruct** for dense visual captioning and a robust ASR model (Whisper/SenseVoice) for accurate audio transcription. The scene-by-scene extracted data is then aggregated into a unified chronological corpus for downstream Retrieval-Augmented Generation or deep video analysis.
 
-## 🛠️ Installation
 
-### 📦 Environment Setup
-
-Create a conda environment and install the dependencies:
+## Prerequisites
 
 ```bash
-conda create --name vea python=3.11
-conda activate vea
+pip install -r requirements.txt
+apt-get install -y ffmpeg
 ```
 
-### 📚 Core Dependencies
+---
 
-Install standard libraries and the specific requirements for Qwen3-VL and Scene Detection:
+## 1. Environment Setup
+
+Create a `.env` file in the project root:
+
+```
+HUGGING_FACE_TOKEN=hf_...
+PYANNOTEAI_API_KEY=sk_...
+OPENAI_API_KEY=sk-...
+```
+
+> `HUGGING_FACE_TOKEN` — required for Whisper alignment model and pyannote diarization  
+> `PYANNOTEAI_API_KEY` — required only if using `--diarization_model precision-2`  
+> `OPENAI_API_KEY` — required for scene caption generation (Step 4)
+
+---
+
+## 2. Dataset Structure
+
+Prepare your dataset folder as follows:
+
+```
+dataset/
+  video_01/
+    video.mp4
+  video_02/
+    video.mp4
+  video_03/
+    video.mp4
+  edu_dataset.json        ← will be generated in Part 2, Step 1
+```
+
+Each video must be in its **own subfolder**. The folder name becomes the `doc_id` used throughout the pipeline.
+
+---
+
+## 3. Clone RST Parser
 
 ```bash
-# Core video processing and vision libraries
-pip install torch torchvision torchaudio accelerate
-pip install flash-attn --no-build-isolation
-
-# Install latest transformers for Qwen3-VL support and PySceneDetect
-pip install git+https://github.com/huggingface/transformers pyscenedetect
-
-# Additional ASR and utilities
-pip install faster_whisper moviepy
+cd VEA_algo/rst_tree_parsing
+git clone https://github.com/thnndat236/RSTParser_EACL24.git
 ```
 
-## 🚀 Quick Start
+---
 
-Here is a sample code snippet to initialize the **Qwen3-VL-2B-Instruct** model, incorporating Flash Attention 2 for memory optimization, and the required hyperparameters.
+## Part 1 — Audio, Transcription & Visual Analysis
 
-```python
-import torch
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+### Step 1: Extract audio + transcribe + speaker diarization
 
-# 1. Initialize Qwen3-VL with Flash Attention 2
-model_id = "Qwen/Qwen2-VL-2B-Instruct" # Note: Qwen3-VL path based on your local/HF state
-model = Qwen2VLForConditionalGeneration.from_pretrained(
-    model_id,
-    torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-    device_map="auto"
-)
+```bash
+python multimodal_to_text/extract_audio_transcribe_diarization.py \
+    --root_dir dataset/ \
+    --diarization_model community-1
+```
 
-processor = AutoProcessor.from_pretrained(model_id)
+Options:
+- `--diarization_model community-1` — uses `pyannote/speaker-diarization-community-1` (free, requires `HUGGING_FACE_TOKEN`)
+- `--diarization_model precision-2` — uses `pyannote/speaker-diarization-precision-2` (paid, requires `PYANNOTEAI_API_KEY`)
+- `--skip_audio` — skip audio extraction (if `audio.wav` already exists)
+- `--skip_separate` — skip vocal separation via demucs
+- `--skip_whisper` — skip transcription
 
-# 2. Hyperparameters configuration
-# As provided: Greedy or Sampling (Temperature, Top_p), and specific Presence Penalties
-generation_kwargs_vl = {
-    "max_new_tokens": 512,
-    "temperature": 0.0,        # 0.0 for Greedy decoding
-    "top_p": 1.0, 
-    "do_sample": False,
-    "presence_penalty": 1.5,   # presence_penalty=1.5 for VL
-}
+Output per video folder:
+```
+video_01/
+  audio.wav
+  demucs_out/htdemucs/audio/vocals.wav
+  audio.json        ← transcript with speaker labels
+```
 
-generation_kwargs_text = {
-    "max_new_tokens": 1024,
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "do_sample": True,
-    "presence_penalty": 2.0,   # presence_penalty=2.0 for Text modules
-}
+### Step 2: Scene detection + visual analysis + scene captions
+
+```bash
+python multimodal_to_text/process_video_multimodal.py \
+    --root_dir dataset/
+```
+
+Options:
+- `--limit_videos N` — process only the first N videos (useful for testing)
+- `--skip_segment` — skip scene detection
+- `--skip_cut_video` — skip cutting video into clips
+- `--skip_visual_caption` — skip Qwen3-VL visual analysis
+- `--skip_scene_caption` — skip OpenAI scene caption generation
+
+Output per video folder:
+```
+video_01/
+  segments.json     ← scenes with transcript, visual_description, visual_elements, caption
+  clips/
+    clip_000_0.03-5.50.mp4
+    clip_001_6.33-7.25.mp4
+    ...
+```
+
+---
+
+## Part 2 — RST Tree Parsing
+
+### Step 1: Prepare EDU dataset
+
+```bash
+python rst_tree_parsing/prepare_edus.py \
+    --root_dir dataset/ \
+    --output_json dataset/edu_dataset.json
+```
+
+Output `dataset/edu_dataset.json`:
+```json
+[
+  {"doc_id": "video_01", "edu_strings": ["caption scene 0", "caption scene 1", ...], "video_dir": "dataset/video_01"},
+  {"doc_id": "video_02", "edu_strings": [...], "video_dir": "dataset/video_02"}
+]
+```
+
+> Videos with fewer than 2 captions are skipped automatically.
+
+### Step 2: Parse RST trees
+
+```bash
+python rst_tree_parsing/rst_tree_parsing.py \
+    --model_size 7b \
+    --corpus rstdt \
+    --parse_type bottom_up \
+    --dataset_file dataset/edu_dataset.json
+```
+
+Options:
+- `--parse_type bottom_up` or `--top_down`
+- `--rel_type rel_with_nuc` (default) or `rel` or `nuc_rel`
+
+Output per video folder:
+```
+video_01/
+  rst_tree.tree     ← RST tree for this video
+```
+
+---
+
+## Full Pipeline (single command sequence)
+
+```bash
+# Part 1
+python multimodal_to_text/extract_audio_transcribe_diarization.py --root_dir dataset/
+python multimodal_to_text/process_video_multimodal.py --root_dir dataset/
+
+# Part 2
+python rst_tree_parsing/prepare_edus.py \
+    --root_dir dataset/ \
+    --output_json dataset/edu_dataset.json
+
+python rst_tree_parsing/rst_tree_parsing.py \
+    --model_size 7b \
+    --corpus rstdt \
+    --dataset_file dataset/edu_dataset.json
 ```
