@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+import gc
 from multiprocessing import Pool
 from pathlib import Path
 from dotenv import load_dotenv
@@ -23,6 +24,7 @@ logging.basicConfig(
 )
 load_dotenv()
 HUGGING_FACE_TOKEN = os.environ.get('HUGGING_FACE_TOKEN')
+PYANNOTEAI_API_KEY = os.environ.get('PYANNOTEAI_API_KEY')
 
 def extract_audio_worker(video_path: Path) -> None:
     """Extract audio from a single video file."""
@@ -55,6 +57,7 @@ class VideoProcessor:
         self.root_dir = Path(args.root_dir)
         self.num_workers = args.num_workers
         self.args = args
+        self.diarization_model = args.diarization_model
         self.device = args.device
         self.batch_size = 16
         self.compute_type = "float16"
@@ -70,8 +73,8 @@ class VideoProcessor:
         if not self.args.skip_audio:
             self.extract_audios()
 
-        if not self.args.skip_seperate:
-            self.seperate_vocal()
+        if not self.args.skip_separate:
+            self.separate_vocal()
 
         if not self.args.skip_whisper:
             self.run_speech_to_text()
@@ -93,8 +96,8 @@ class VideoProcessor:
             list(tqdm(p.imap(extract_audio_worker, video_paths), 
                      total=len(video_paths), desc="Extracting Audio"))
 
-    def seperate_vocal(self) -> None:
-        """Seperate vocal from audio using demucs."""
+    def separate_vocal(self) -> None:
+        """separate vocal from audio using demucs."""
         video_dirs = [d for d in self.root_dir.iterdir() if d.is_dir()]
         
         if not video_dirs:
@@ -111,12 +114,10 @@ class VideoProcessor:
                        "--device", self.device]
             demucs.separate.main(command)
         
-        import gc
         gc.collect()
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
 
     def run_speech_to_text(self):
         """Transcribe audio files using Whisper."""
@@ -127,48 +128,57 @@ class VideoProcessor:
             logging.warning("No video directories found")
             return
 
-        logging.info("Loading Whisper model 'large-v2'")
-        model = whisperx.load_model("large-v2", self.device, compute_type=self.compute_type)
-        diarize_model = DiarizationPipeline(token=HUGGING_FACE_TOKEN, device=self.device)
-
-        for video_dir in tqdm(video_dirs, desc="Transcribing Audio"):
-            vocal_path = video_dir / 'demucs_out' / 'htdemucs' / 'audio' / 'vocals.wav'
-            json_path = video_dir / 'audio.json'
- 
-            audio_path = vocal_path if vocal_path.exists() else video_dir / 'audio.wav'
-            if json_path.exists() or not audio_path.exists():
-                continue
-
-            try:
-                logging.info(f"Transcribing: {audio_path}")
-
-                # 1. Transcribe with original whisper (batched)
-                audio = whisperx.load_audio(audio_path)
-                result = model.transcribe(audio, batch_size=self.batch_size)
-                
-                # 2. Align whisper output
-                model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
-                result = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
-                del model_a
-                torch.cuda.empty_cache()
-
-                # 3. Assign speaker labels
-                diarize_segments = diarize_model(audio)
-                result = whisperx.assign_word_speakers(diarize_segments, result)
-
-                with json_path.open('w', encoding='utf-8') as f:
-                    json.dump(result["segments"], f, indent=2, ensure_ascii=False)
-                    
-            except Exception as e:
-                logging.error(f"Error transcribing {audio_path}: {e}")
-
-        import gc
-        gc.collect()
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        model = None
+        diarize_model = None
         
-        del model, diarize_model
+        try:
+            logging.info("Loading Whisper model 'large-v2'")
+            model = whisperx.load_model("large-v2", self.device, compute_type=self.compute_type)
+            
+            if self.diarization_model == 'community-1':
+                diarize_model = DiarizationPipeline(model_name='pyannote/speaker-diarization-community-1', token=HUGGING_FACE_TOKEN, device=self.device)
+            elif self.diarization_model == 'precision-2':
+                diarize_model = DiarizationPipeline(model_name='pyannote/speaker-diarization-precision-2', token=PYANNOTEAI_API_KEY, device=self.device)
+            else:
+                raise ValueError(f"Unknown diarization_model: {self.diarization_model}")
+            
+            for video_dir in tqdm(video_dirs, desc="Transcribing Audio"):
+                vocal_path = video_dir / 'demucs_out' / 'htdemucs' / 'audio' / 'vocals.wav'
+                json_path = video_dir / 'audio.json'
+    
+                audio_path = vocal_path if vocal_path.exists() else video_dir / 'audio.wav'
+                if json_path.exists() or not audio_path.exists():
+                    continue
+
+                try:
+                    logging.info(f"Transcribing: {audio_path}")
+
+                    # 1. Transcribe with original whisper (batched)
+                    audio = whisperx.load_audio(audio_path)
+                    result = model.transcribe(audio, batch_size=self.batch_size)
+                    
+                    # 2. Align whisper output
+                    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
+                    result = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
+                    del model_a
+                    torch.cuda.empty_cache()
+
+                    # 3. Assign speaker labels
+                    diarize_segments = diarize_model(audio)
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+
+                    with json_path.open('w', encoding='utf-8') as f:
+                        json.dump(result["segments"], f, indent=2, ensure_ascii=False)
+                        
+                except Exception as e:
+                    logging.error(f"Error transcribing {audio_path}: {e}")
+        
+        finally:
+            del model, diarize_model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
 
 def main():
     """Parse arguments and run the video processing pipeline."""
@@ -179,9 +189,11 @@ def main():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help="Device to use ('cuda' or 'cpu').")
     parser.add_argument('--num_workers', type=int, default=os.cpu_count() or 1,
                        help='Number of worker processes for parallel processing')
+    parser.add_argument('--diarization_model', type=str, default='community-1', choices=['community-1', 'precision-2'],
+                       help='Model speaker diarization')
     parser.add_argument('--skip_audio', action='store_true',
                        help='Skip audio extraction step')
-    parser.add_argument('--skip_seperate', action='store_true',
+    parser.add_argument('--skip_separate', action='store_true',
                        help='Skip vocal seperation step')
     parser.add_argument('--skip_whisper', action='store_true',
                        help='Skip speech-to-text step')
