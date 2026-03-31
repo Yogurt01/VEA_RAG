@@ -48,15 +48,22 @@ For mood, color_temperature, color_saturation, color_lightness, lighting, backgr
 pick EXACTLY ONE value from the options listed.
 """
 
-COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions.
-You will receive a list of scenes from a single video. Each scene has a transcript, visual description, and OCR text.
+COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions for short video clips.
+You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
 
-Rules:
+Rules for writing captions:
 - Write a "caption" for each scene: 1-2 sentences, specific and concrete.
 - Focus on what is DIFFERENT or NEW in each scene compared to others (new speaker, change in action, emotional shift, new visual element).
 - Do NOT repeat shared background details in every caption — mention setting only once in the first scene or when it changes.
-- Use speaker labels or infer roles from context.
 - If OCR text is clearly a subtitle copy of the transcript, ignore it. Only use OCR if it adds new info (signs, overlays, lower-thirds).
+
+Speaker diarization note:
+- Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are generated automatically and may be incorrect.
+- If the transcript speaker label seems inconsistent with the visual description (e.g., the transcript says SPEAKER_00 but the visual shows a different person speaking), use visual context and conversational logic to infer who is actually speaking.
+- Do not blindly trust speaker labels — cross-reference with who is visible, mouth movements, turn-taking patterns, and topic continuity across scenes.
+- If speaker identity cannot be confidently inferred, use neutral phrasing (e.g., "one of the speakers", "the person on the left").
+
+Output format:
 - Output ONLY a JSON array, one object per scene, in order:
 [{"scene_id": 0, "caption": "..."}, ...]
 """
@@ -373,11 +380,12 @@ class Prompter:
             with open(segment_file, 'r', encoding='utf-8') as f:
                 segments = json.load(f)
 
-            # Bỏ qua nếu tất cả scene đã có caption
+            # Skip if all scenes already have captions
             if all("caption" in seg for seg in segments):
+                print(f"Skipping scene caption for {video_dir.name}, already processed.")
                 continue
 
-            # Build payload gửi lên LLM — chỉ những gì cần thiết
+            # Build payload with only the fields needed by the LLM
             scenes_payload = []
             for i, seg in enumerate(segments):
                 transcript_lines = [
@@ -386,25 +394,24 @@ class Prompter:
                     if t.strip()
                 ]
                 scenes_payload.append({
-                    "scene_id":          i,
-                    "start":             seg["start"][0] if isinstance(seg["start"], list) else seg["start"],
-                    "end":               seg["end"][-1]  if isinstance(seg["end"],   list) else seg["end"],
-                    "transcript":        " / ".join(transcript_lines) or "(no speech)",
+                    "scene_id": i,
+                    "start": seg["start"][0] if isinstance(seg["start"], list) else seg["start"],
+                    "end": seg["end"][-1]  if isinstance(seg["end"],   list) else seg["end"],
+                    "transcript": " / ".join(transcript_lines) or "(no speech)",
                     "visual_description": seg.get("visual_description", ""),
-                    "ocr_text":          seg.get("ocr_text", []),
+                    "ocr_text": seg.get("ocr_text", []),
                 })
 
-            user_prompt = f"""Scenes:
-    {json.dumps(scenes_payload, ensure_ascii=False, indent=2)}
-
-    Write captions that highlight what changes between scenes, not what stays the same.
-    """
+            user_prompt = (
+                f"Scenes:\n{json.dumps(scenes_payload, ensure_ascii=False, indent=2)}\n\n"
+                "Write captions that highlight what changes between scenes, not what stays the same."
+            )
 
             response = self.openai_client.chat.completions.create(
-                model="gpt-5.4-mini",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": COHERENT_SCENE_SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=4096,
                 temperature=0.2,
@@ -421,21 +428,20 @@ class Prompter:
             with open(segment_file, 'w', encoding='utf-8') as f:
                 json.dump(segments, f, indent=2, ensure_ascii=False)
 
-
     def _parse_caption_response(self, raw: str) -> dict:
-        """Parse JSON array từ LLM response, trả về {scene_id: caption}."""
+        """Parse JSON array from LLM response, return {scene_id: caption}."""
         text = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
         try:
             arr = json.loads(text)
         except json.JSONDecodeError:
             m = re.search(r'\[.*\]', text, re.DOTALL)
             if not m:
-                print(f"Parse thất bại: {text[:80]}")
+                print(f"Failed to parse caption response: {text[:80]}")
                 return {}
             try:
                 arr = json.loads(m.group())
             except json.JSONDecodeError:
-                print(f"Parse thất bại: {text[:80]}")
+                print(f"Failed to parse caption response: {text[:80]}")
                 return {}
 
         return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
