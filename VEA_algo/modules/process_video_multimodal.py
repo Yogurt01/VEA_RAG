@@ -4,17 +4,62 @@ import json
 import os
 import sys
 import time
+import re
 import unicodedata
 from glob import glob
 from pathlib import Path
+import subprocess
 
 import cv2
 import torch
 from scenedetect import AdaptiveDetector
+import fiftyone as fo
+import fiftyone.zoo as foz
+from openai import OpenAI
 
-# Add InternVideo to system path for retrieval models
 from segment import scene_detection, segment_with_stt_timestamp
 
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+
+QWEN_PROMPT_TEMPLATE =  """You have the following transcript for this video scene:
+{transcript}
+
+Using the transcript above only as a hint for who is speaking, analyze this video clip.
+Respond ONLY with a valid JSON object, no markdown, no explanation.
+
+{{
+    "visual_description": "Describe only what you SEE: setting, people present, their "
+                            "appearance (clothing, expressions, posture), physical actions, "
+                            "camera angle/framing. Do NOT interpret meaning or infer narrative.",
+    "activities": {{
+        "primary_activity": "main physical action observable",
+        "secondary_activities": "other actions visible, comma-separated"
+    }},
+    "ocr": "Text PHYSICALLY VISIBLE on screen (subtitles, signs, banners, lower-thirds, overlays). Do NOT copy from the transcript above. If no text is visually present on screen, return an empty list []. If text is present, return the results as a list of strings (e.g., ['text1', 'text2']).",
+    "mood": "calm|energetic|dramatic|neutral",
+    "color_temperature": "warm|cool|achromatic",
+    "color_saturation": "high|medium|low",
+    "color_lightness": "high|low",
+    "lighting": "natural|studio|low_light|vibrant_neon|flat_dull",
+    "background": "minimalist|luxury_modern|urban_outdoor|nature|cluttered_home"
+}}
+
+For mood, color_temperature, color_saturation, color_lightness, lighting, background:
+pick EXACTLY ONE value from the options listed.
+"""
+
+COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions.
+You will receive a list of scenes from a single video. Each scene has a transcript, visual description, and OCR text.
+
+Rules:
+- Write a "caption" for each scene: 1-2 sentences, specific and concrete.
+- Focus on what is DIFFERENT or NEW in each scene compared to others (new speaker, change in action, emotional shift, new visual element).
+- Do NOT repeat shared background details in every caption — mention setting only once in the first scene or when it changes.
+- Use speaker labels or infer roles from context.
+- If OCR text is clearly a subtitle copy of the transcript, ignore it. Only use OCR if it adds new info (signs, overlays, lower-thirds).
+- Output ONLY a JSON array, one object per scene, in order:
+[{"scene_id": 0, "caption": "..."}, ...]
+"""
 
 def normalize_path(path):
     """
@@ -44,16 +89,15 @@ class Prompter:
         self.min_content_val = args.min_content_val
 
         # File names
-        self.caption_filename = 'caption_corpus.pt'
         self.segmentation_filename = 'segments.json'
+        self.clips_directory = 'clips'
 
         # Control flags for processing steps
         self.skip_segment = args.skip_segment
-        self.skip_ocr = args.skip_ocr
-        self.skip_diarization = args.skip_diarization
-        self.skip_caption = args.skip_caption
-        self.skip_vcap = args.skip_vcap
-        self.skip_audio = args.skip_audio
+        self.skip_cut_video = args.skip_cut_video
+        self.skip_visual_caption = args.skip_visual_caption
+        self.skip_scene_caption = args.skip_scene_caption
+        # self.skip_audio = args.skip_audio
         
         # Get all video directory paths, optionally limited
         all_video_dirs = sorted([d for d in self.root_dir.iterdir() if d.is_dir()])
@@ -65,6 +109,8 @@ class Prompter:
             mp4_files = list(vdir.glob('*.mp4'))
             if mp4_files:
                 self.videos.append(mp4_files[0])
+
+        self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
     def _clean_memory(self):
         """
@@ -145,6 +191,256 @@ class Prompter:
         except Exception as e:
             print(f"Error creating default segment for {video_path.parent.name}: {e}")
 
+    ## --------------------
+    ## 2. Cut Video into Clips
+    ## --------------------
+    def _cut_videos(self):
+        for video_dir, video_path in zip(self.video_dirs, self.videos):
+            segment_file = video_dir / self.segmentation_filename
+            if not segment_file.exists():
+                continue
+            
+            with open(segment_file, 'r', encoding='utf-8') as f:
+                segments = json.load(f)
+
+            clips_dir = video_dir / self.clips_directory
+            clips_dir.mkdir(exist_ok=True)
+            
+            for i, seg in enumerate(segments):
+                start_list = seg["start"]
+                end_list = seg["end"]
+
+                clip_start = start_list[0] if isinstance(start_list, list) else start_list
+                clip_end = end_list[-1] if isinstance(end_list, list) else end_list
+
+                clip_name = f"clip_{i:03d}_{clip_start:.2f}-{clip_end:.2f}.mp4"
+                clip_path = clips_dir / clip_name
+
+                ok = self._cut_clip(video_path, clip_start, clip_end, clip_path)
+                if ok:
+                    seg["clip_path"] = str(clip_path)
+
+            with open(segment_file, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2, ensure_ascii=False)
+                
+    def _cut_clip(self, src: Path, start: float, end: float, dst: Path) -> bool:
+        if dst.exists() and dst.stat().st_size > 1000:
+            return True
+
+        duration = round(end - start, 3)
+        if duration <= 0:
+            return False
+
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-ss",  str(start),
+                "-i",   str(src),
+                "-t",   str(duration),
+                "-c",   "copy",
+                "-avoid_negative_ts", "1",
+                str(dst),
+                "-y",
+                "-loglevel", "error"
+            ],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            return False
+        return True
+
+    ## --------------------
+    ## 3. Generate Visual Caption Corpus
+    ## --------------------
+    def _generate_caption_corpus(self):
+        # Register the model source
+        foz.register_zoo_model_source(
+            "https://github.com/harpreetsahota204/qwen3vl_video",
+            overwrite=True
+        )
+        # Load Qwen3-VL model
+        model = foz.load_zoo_model("Qwen/Qwen3-VL-2B-Instruct")
+        model.operation = "custom"
+
+        for video_dir, video_path in zip(self.video_dirs, self.videos):
+            segment_file = video_dir / self.segmentation_filename
+            if not segment_file.exists():
+                continue
+
+            with open(segment_file, 'r', encoding='utf-8') as f:
+                segments = json.load(f)
+
+            if all("visual_description" in seg for seg in segments):
+                print(f"Skipping visual caption for {video_dir.name}, already processed.")
+                continue
+
+            file_name = video_path.name
+            dataset_name = f"clips-dataset-{file_name}"
+
+            if fo.dataset_exists(dataset_name):
+                fo.delete_dataset(dataset_name)
+            clips_dataset = fo.Dataset(name=dataset_name)
+
+            clip_to_idx = {}
+            for i, scene in enumerate(segments):
+                clip_path = scene.get("clip_path")
+                if clip_path is None:
+                    continue
+
+                texts    = scene.get("text", [])
+                speakers = scene.get("speaker", [])
+                transcript = [
+                    {"speaker": sp, "text": t}
+                    for sp, t in zip(speakers, texts)
+                ]
+
+                s = fo.Sample(filepath=str(clip_path))
+                s["transcript"] = transcript
+                clips_dataset.add_sample(s)
+                clip_to_idx[str(clip_path)] = i
+
+            clips_dataset.compute_metadata()
+
+            for sample in clips_dataset.iter_samples(autosave=True):
+                transcript = sample.get_field("transcript") or ""
+                sample["qwen_prompt"] = QWEN_PROMPT_TEMPLATE.format(transcript=transcript)
+
+            clips_dataset.apply_model(
+                model,
+                prompt_field="qwen_prompt",
+                label_field="custom_analysis",
+                skip_failures=True
+            )
+
+            for sample in clips_dataset.iter_samples():
+                idx = clip_to_idx.get(sample.filepath)
+                if idx is None:
+                    continue
+
+                content_str = sample["custom_analysis_result"]
+                if not content_str:
+                    continue
+
+                result = self._clean_and_parse_json(content_str)
+                if "_raw" in result:
+                    continue
+
+                segments[idx]["ocr_text"] = result.get("ocr", "")
+                segments[idx]["visual_description"] = result.get("visual_description", "")
+                segments[idx]["visual_elements"] = {
+                    "activities": result.get("activities", {}),
+                    "mood": result.get("mood", ""),
+                    "color_temperature": result.get("color_temperature", ""),
+                    "color_saturation": result.get("color_saturation", ""),
+                    "color_lightness": result.get("color_lightness", ""),
+                    "lighting": result.get("lighting", ""),
+                    "background": result.get("background", ""),
+                }
+
+            with open(segment_file, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2, ensure_ascii=False)
+
+        del model
+        self._clean_memory()
+
+    def _clean_and_parse_json(self, text: str):
+        text = re.sub(r'```(?:json)?\s*|\s*```', '', text).strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+            print(f"False to parse, saving raw: {text[:80]}")
+            return {"_raw": text}
+
+    
+    ## --------------------
+    ## 4. Generate Scene Caption
+    ## --------------------
+    def _generate_scene_captions(self):
+        for video_dir, video_path in zip(self.video_dirs, self.videos):
+            segment_file = video_dir / self.segmentation_filename
+            if not segment_file.exists():
+                continue
+
+            with open(segment_file, 'r', encoding='utf-8') as f:
+                segments = json.load(f)
+
+            # Bỏ qua nếu tất cả scene đã có caption
+            if all("caption" in seg for seg in segments):
+                continue
+
+            # Build payload gửi lên LLM — chỉ những gì cần thiết
+            scenes_payload = []
+            for i, seg in enumerate(segments):
+                transcript_lines = [
+                    f"{sp}: {t}"
+                    for sp, t in zip(seg.get("speaker", []), seg.get("text", []))
+                    if t.strip()
+                ]
+                scenes_payload.append({
+                    "scene_id":          i,
+                    "start":             seg["start"][0] if isinstance(seg["start"], list) else seg["start"],
+                    "end":               seg["end"][-1]  if isinstance(seg["end"],   list) else seg["end"],
+                    "transcript":        " / ".join(transcript_lines) or "(no speech)",
+                    "visual_description": seg.get("visual_description", ""),
+                    "ocr_text":          seg.get("ocr_text", []),
+                })
+
+            user_prompt = f"""Scenes:
+    {json.dumps(scenes_payload, ensure_ascii=False, indent=2)}
+
+    Write captions that highlight what changes between scenes, not what stays the same.
+    """
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-5.4-mini",
+                messages=[
+                    {"role": "system", "content": COHERENT_SCENE_SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_prompt}
+                ],
+                max_tokens=4096,
+                temperature=0.2,
+            )
+
+            raw = response.choices[0].message.content
+            caption_map = self._parse_caption_response(raw)
+
+            for i, seg in enumerate(segments):
+                cap = caption_map.get(i)
+                if cap:
+                    seg["caption"] = cap
+
+            with open(segment_file, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2, ensure_ascii=False)
+
+
+    def _parse_caption_response(self, raw: str) -> dict:
+        """Parse JSON array từ LLM response, trả về {scene_id: caption}."""
+        text = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
+        try:
+            arr = json.loads(text)
+        except json.JSONDecodeError:
+            m = re.search(r'\[.*\]', text, re.DOTALL)
+            if not m:
+                print(f"Parse thất bại: {text[:80]}")
+                return {}
+            try:
+                arr = json.loads(m.group())
+            except json.JSONDecodeError:
+                print(f"Parse thất bại: {text[:80]}")
+                return {}
+
+        return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
+
+
     def run(self):
         """
         Executes the entire processing pipeline.
@@ -157,6 +453,18 @@ class Prompter:
                 print("\n--- Step 1: Video Segmentation ---")
                 self._segment_videos()
 
+            if not self.skip_cut_video:
+                print("\n--- Step 2: Cut Video into Clips ---")
+                self._cut_videos()
+
+            if not self.skip_visual_caption:
+                print("\n--- Step 3: Generate Visual Caption Corpus ---")
+                self._generate_caption_corpus()
+
+            if not self.skip_scene_caption:
+                print("\n--- Step 4: Generate Scene Caption Corpus ---")
+                self._generate_scene_captions()
+
             print(f"\nAll processing steps completed in {time.time() - start_time:.2f} seconds.")
 
         except Exception as e:
@@ -165,7 +473,7 @@ class Prompter:
             traceback.print_exc()
         finally:
             self._clean_memory()
-
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process videos to generate segments, OCR, and captions.")
@@ -181,11 +489,10 @@ if __name__ == '__main__':
 
     # Skip flags
     parser.add_argument('--skip_segment', action='store_true', help="Skip video segmentation.")
-    parser.add_argument('--skip_ocr', action='store_true', help="Skip OCR processing.")
-    parser.add_argument('--skip_diarization', action='store_true', help="Skip speaker diarization.")
-    parser.add_argument('--skip_caption', action='store_true', help="Skip visual caption generation.")
-    parser.add_argument('--skip_vcap', action='store_true', help="Skip final caption selection.")
-    parser.add_argument('--skip_audio', action='store_true', help="Skip audio tagging.")
+    parser.add_argument('--skip_cut_video', action='store_true', help="Skip cut video into clips.")
+    parser.add_argument('--skip_visual_caption', action='store_true', help="Skip visual caption generation.")
+    parser.add_argument('--skip_scene_caption', action='store_true', help="Skip scene caption generation.")
+    # parser.add_argument('--skip_audio', action='store_true', help="Skip audio tagging.")
 
     args = parser.parse_args()
 
