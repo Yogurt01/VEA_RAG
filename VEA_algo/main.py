@@ -1,7 +1,7 @@
 import logging
-from modules.scene_detector import SceneExtractor
-from modules.captioner import VLMProcessor
-from modules.transcriber import ASRProcessor
+from extract.scene_detector import SceneExtractor
+from modules.vlm.captioner import VLMProcessor
+from modules.ast.transcriber import ASRProcessor
 from utils.data_handler import save_corpus, cleanup_temp_dir
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

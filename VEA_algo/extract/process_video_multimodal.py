@@ -9,7 +9,6 @@ import unicodedata
 from glob import glob
 from pathlib import Path
 import subprocess
-# from dotenv import load_dotenv
 
 import cv2
 import torch
@@ -18,9 +17,8 @@ import fiftyone as fo
 import fiftyone.zoo as foz
 from openai import OpenAI
 
-from segment import scene_detection, segment_with_stt_timestamp
+from .segment import scene_detection, segment_with_stt_timestamp
 
-# load_dotenv()
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 QWEN_PROMPT_TEMPLATE =  """You have the following transcript for this video scene:
