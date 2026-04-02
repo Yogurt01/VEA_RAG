@@ -1,14 +1,14 @@
 import torch
 import torchaudio
 import torch.nn.functional as F
-import pandas as pd
+import json
 import os
 
 # Import các thành phần từ folder 'beats' của Microsoft
 from beats.BEATs import BEATs, BEATsConfig
 
 class AudioFeatureExtractor:
-    def __init__(self, checkpoint_path, label_csv_path=None):
+    def __init__(self, checkpoint_path, config_json_path=None):
         # Khởi tạo và nạp trọng số cho mô hình BEATs
         print(f"--- Loading model from: {checkpoint_path} ---")
         
@@ -23,13 +23,13 @@ class AudioFeatureExtractor:
         self.model.to(device)
         self.model.eval()
         
-        # 3. Nạp danh mục nhãn AudioSet từ file CSV
-        self.label_list = None
-        if label_csv_path and os.path.exists(label_csv_path):
-            df = pd.read_csv(label_csv_path)
-            self.label_list = df['display_name'].tolist()
+        # 3. Nạp danh mục nhãn AudioSet từ file JSON
+        self.config_data = {}
+        if config_json_path and os.path.exists(config_json_path):
+            with open(config_json_path, mode='r', encoding='utf-8') as f:
+                self.config_data = json.load(f)
         else:
-            print("Warning: Label mapping file not found. Results will show raw indices.")
+            print("Warning: Label configuration file not found. Results will show raw indices.")
 
     def _preprocess(self, audio_path):
         # Tiền xử lý âm thanh: chuẩn hóa về 16kHz và chuyển sang mono
@@ -60,41 +60,69 @@ class AudioFeatureExtractor:
             # Tính trung bình xác suất trên toàn bộ chiều thời gian của đoạn audio
             probabilities = torch.sigmoid(logits).mean(dim=0)
             
-            # Lấy ra K nhãn có xác suất cao nhất
-            top_probs, top_indices = torch.topk(probabilities, k=top_k)
+            # Lấy ra tất cả các nhãn và sắp xếp theo xác suất giảm dần
+            sorted_probs, sorted_indices = torch.sort(probabilities, descending=True)
             
-        inference_results = []
-        for i in range(len(top_indices)):
-            idx = top_indices[i].item()
-            conf_score = top_probs[i].item()
+        audio_tags = []
+        audio_vibes = []
+        
+        for i in range(len(sorted_indices)):
+            # Dừng vòng lặp nếu cả hai danh sách đều đã đạt đủ top_k
+            if len(audio_tags) >= top_k and len(audio_vibes) >= top_k:
+                break
+                
+            idx = sorted_indices[i].item()
+            conf_score = sorted_probs[i].item()
+            str_idx = str(idx)
             
-            # Ánh xạ chỉ số (index) sang tên nhãn tiếng Anh
-            label_name = self.label_list[idx] if self.label_list else f"Class_{idx}"
+            # Ánh xạ chỉ số (index) sang tên nhãn tiếng Anh và loại (type)
+            if self.config_data and str_idx in self.config_data:
+                label_info = self.config_data[str_idx]
+                label_name = label_info["label"]
+                label_type = label_info["type"]
+            else:
+                label_name = f"Class_{idx}"
+                label_type = "tag"  # Mặc định là tag nếu không có cấu hình
             
-            inference_results.append({
+            result_item = {
                 "label": label_name, 
                 "confidence": round(conf_score, 4)
-            })
+            }
             
-        return inference_results
+            if label_type == "vibe":
+                if len(audio_vibes) < top_k:
+                    audio_vibes.append(result_item)
+            else:
+                if len(audio_tags) < top_k:
+                    audio_tags.append(result_item)
+                    
+        return {
+            "audio_tags": audio_tags,
+            "audio_vibes": audio_vibes
+        }
 
 # --- ĐOẠN MÃ CHẠY THỬ NGHIỆM ---
 if __name__ == "__main__":
     # Cấu hình đường dẫn tệp tin
-    CHECKPOINT_FILE = "./checkpoints/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
-    LABEL_MAPPING_FILE = "./class_labels_indices.csv"
+    CHECKPOINT_FILE = "../modules/checkpoints/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
+    CONFIG_FILE = "../modules/beats/config.json"
     INPUT_AUDIO = "sample_scene.wav"
 
     try:
         # Khởi tạo bộ trích xuất
-        extractor = AudioFeatureExtractor(CHECKPOINT_FILE, LABEL_MAPPING_FILE)
+        extractor = AudioFeatureExtractor(CHECKPOINT_FILE, CONFIG_FILE)
         
         # Chạy dự đoán
-        outputs = extractor.get_prediction(INPUT_AUDIO, top_k=10)
+        outputs = extractor.get_prediction(INPUT_AUDIO, top_k=5)
 
         print(f"\n--- Extraction Results for: {INPUT_AUDIO} ---")
-        for item in outputs:
-            print(f"Tag/Vibe: {item['label']} | Confidence: {item['confidence']}")
+        print("Audio Tags:")
+        for item in outputs["audio_tags"]:
+            print(f"  - {item['label']} (Confidence: {item['confidence']})")
+            
+        print("\nAudio Vibes:")
+        for item in outputs["audio_vibes"]:
+            print(f"  - {item['label']} (Confidence: {item['confidence']})")
             
     except Exception as error:
         print(f"An error occurred during execution: {error}")
