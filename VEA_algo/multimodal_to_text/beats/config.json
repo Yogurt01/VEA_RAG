@@ -1,0 +1,2110 @@
+{
+    "0": {
+        "label": "Speech",
+        "type": "tag"
+    },
+    "1": {
+        "label": "Male speech, man speaking",
+        "type": "tag"
+    },
+    "2": {
+        "label": "Female speech, woman speaking",
+        "type": "tag"
+    },
+    "3": {
+        "label": "Child speech, kid speaking",
+        "type": "tag"
+    },
+    "4": {
+        "label": "Conversation",
+        "type": "tag"
+    },
+    "5": {
+        "label": "Narration, monologue",
+        "type": "tag"
+    },
+    "6": {
+        "label": "Babbling",
+        "type": "tag"
+    },
+    "7": {
+        "label": "Speech synthesizer",
+        "type": "tag"
+    },
+    "8": {
+        "label": "Shout",
+        "type": "tag"
+    },
+    "9": {
+        "label": "Bellow",
+        "type": "tag"
+    },
+    "10": {
+        "label": "Whoop",
+        "type": "tag"
+    },
+    "11": {
+        "label": "Yell",
+        "type": "tag"
+    },
+    "12": {
+        "label": "Battle cry",
+        "type": "tag"
+    },
+    "13": {
+        "label": "Children shouting",
+        "type": "tag"
+    },
+    "14": {
+        "label": "Screaming",
+        "type": "tag"
+    },
+    "15": {
+        "label": "Whispering",
+        "type": "tag"
+    },
+    "16": {
+        "label": "Laughter",
+        "type": "tag"
+    },
+    "17": {
+        "label": "Baby laughter",
+        "type": "tag"
+    },
+    "18": {
+        "label": "Giggle",
+        "type": "tag"
+    },
+    "19": {
+        "label": "Snicker",
+        "type": "tag"
+    },
+    "20": {
+        "label": "Belly laugh",
+        "type": "tag"
+    },
+    "21": {
+        "label": "Chuckle, chortle",
+        "type": "tag"
+    },
+    "22": {
+        "label": "Crying, sobbing",
+        "type": "tag"
+    },
+    "23": {
+        "label": "Baby cry, infant cry",
+        "type": "tag"
+    },
+    "24": {
+        "label": "Whimper",
+        "type": "tag"
+    },
+    "25": {
+        "label": "Wail, moan",
+        "type": "tag"
+    },
+    "26": {
+        "label": "Sigh",
+        "type": "tag"
+    },
+    "27": {
+        "label": "Singing",
+        "type": "tag"
+    },
+    "28": {
+        "label": "Choir",
+        "type": "tag"
+    },
+    "29": {
+        "label": "Yodeling",
+        "type": "tag"
+    },
+    "30": {
+        "label": "Chant",
+        "type": "tag"
+    },
+    "31": {
+        "label": "Mantra",
+        "type": "tag"
+    },
+    "32": {
+        "label": "Male singing",
+        "type": "tag"
+    },
+    "33": {
+        "label": "Female singing",
+        "type": "tag"
+    },
+    "34": {
+        "label": "Child singing",
+        "type": "tag"
+    },
+    "35": {
+        "label": "Synthetic singing",
+        "type": "tag"
+    },
+    "36": {
+        "label": "Rapping",
+        "type": "tag"
+    },
+    "37": {
+        "label": "Humming",
+        "type": "tag"
+    },
+    "38": {
+        "label": "Groan",
+        "type": "tag"
+    },
+    "39": {
+        "label": "Grunt",
+        "type": "tag"
+    },
+    "40": {
+        "label": "Whistling",
+        "type": "tag"
+    },
+    "41": {
+        "label": "Breathing",
+        "type": "tag"
+    },
+    "42": {
+        "label": "Wheeze",
+        "type": "tag"
+    },
+    "43": {
+        "label": "Snoring",
+        "type": "tag"
+    },
+    "44": {
+        "label": "Gasp",
+        "type": "tag"
+    },
+    "45": {
+        "label": "Pant",
+        "type": "tag"
+    },
+    "46": {
+        "label": "Snort",
+        "type": "tag"
+    },
+    "47": {
+        "label": "Cough",
+        "type": "tag"
+    },
+    "48": {
+        "label": "Throat clearing",
+        "type": "tag"
+    },
+    "49": {
+        "label": "Sneeze",
+        "type": "tag"
+    },
+    "50": {
+        "label": "Sniff",
+        "type": "tag"
+    },
+    "51": {
+        "label": "Run",
+        "type": "tag"
+    },
+    "52": {
+        "label": "Shuffle",
+        "type": "tag"
+    },
+    "53": {
+        "label": "Walk, footsteps",
+        "type": "tag"
+    },
+    "54": {
+        "label": "Chewing, mastication",
+        "type": "tag"
+    },
+    "55": {
+        "label": "Biting",
+        "type": "tag"
+    },
+    "56": {
+        "label": "Gargling",
+        "type": "tag"
+    },
+    "57": {
+        "label": "Stomach rumble",
+        "type": "tag"
+    },
+    "58": {
+        "label": "Burping, eructation",
+        "type": "tag"
+    },
+    "59": {
+        "label": "Hiccup",
+        "type": "tag"
+    },
+    "60": {
+        "label": "Fart",
+        "type": "tag"
+    },
+    "61": {
+        "label": "Hands",
+        "type": "tag"
+    },
+    "62": {
+        "label": "Finger snapping",
+        "type": "tag"
+    },
+    "63": {
+        "label": "Clapping",
+        "type": "tag"
+    },
+    "64": {
+        "label": "Heart sounds, heartbeat",
+        "type": "tag"
+    },
+    "65": {
+        "label": "Heart murmur",
+        "type": "tag"
+    },
+    "66": {
+        "label": "Cheering",
+        "type": "tag"
+    },
+    "67": {
+        "label": "Applause",
+        "type": "tag"
+    },
+    "68": {
+        "label": "Chatter",
+        "type": "tag"
+    },
+    "69": {
+        "label": "Crowd",
+        "type": "tag"
+    },
+    "70": {
+        "label": "Hubbub, speech noise, speech babble",
+        "type": "vibe"
+    },
+    "71": {
+        "label": "Children playing",
+        "type": "tag"
+    },
+    "72": {
+        "label": "Animal",
+        "type": "tag"
+    },
+    "73": {
+        "label": "Domestic animals, pets",
+        "type": "tag"
+    },
+    "74": {
+        "label": "Dog",
+        "type": "tag"
+    },
+    "75": {
+        "label": "Bark",
+        "type": "tag"
+    },
+    "76": {
+        "label": "Yip",
+        "type": "tag"
+    },
+    "77": {
+        "label": "Howl",
+        "type": "tag"
+    },
+    "78": {
+        "label": "Bow-wow",
+        "type": "tag"
+    },
+    "79": {
+        "label": "Growling",
+        "type": "tag"
+    },
+    "80": {
+        "label": "Whimper (dog)",
+        "type": "tag"
+    },
+    "81": {
+        "label": "Cat",
+        "type": "tag"
+    },
+    "82": {
+        "label": "Purr",
+        "type": "tag"
+    },
+    "83": {
+        "label": "Meow",
+        "type": "tag"
+    },
+    "84": {
+        "label": "Hiss",
+        "type": "tag"
+    },
+    "85": {
+        "label": "Caterwaul",
+        "type": "tag"
+    },
+    "86": {
+        "label": "Livestock, farm animals, working animals",
+        "type": "tag"
+    },
+    "87": {
+        "label": "Horse",
+        "type": "tag"
+    },
+    "88": {
+        "label": "Clip-clop",
+        "type": "tag"
+    },
+    "89": {
+        "label": "Neigh, whinny",
+        "type": "tag"
+    },
+    "90": {
+        "label": "Cattle, bovinae",
+        "type": "tag"
+    },
+    "91": {
+        "label": "Moo",
+        "type": "tag"
+    },
+    "92": {
+        "label": "Cowbell",
+        "type": "tag"
+    },
+    "93": {
+        "label": "Pig",
+        "type": "tag"
+    },
+    "94": {
+        "label": "Oink",
+        "type": "tag"
+    },
+    "95": {
+        "label": "Goat",
+        "type": "tag"
+    },
+    "96": {
+        "label": "Bleat",
+        "type": "tag"
+    },
+    "97": {
+        "label": "Sheep",
+        "type": "tag"
+    },
+    "98": {
+        "label": "Fowl",
+        "type": "tag"
+    },
+    "99": {
+        "label": "Chicken, rooster",
+        "type": "tag"
+    },
+    "100": {
+        "label": "Cluck",
+        "type": "tag"
+    },
+    "101": {
+        "label": "Crowing, cock-a-doodle-doo",
+        "type": "tag"
+    },
+    "102": {
+        "label": "Turkey",
+        "type": "tag"
+    },
+    "103": {
+        "label": "Gobble",
+        "type": "tag"
+    },
+    "104": {
+        "label": "Duck",
+        "type": "tag"
+    },
+    "105": {
+        "label": "Quack",
+        "type": "tag"
+    },
+    "106": {
+        "label": "Goose",
+        "type": "tag"
+    },
+    "107": {
+        "label": "Honk",
+        "type": "tag"
+    },
+    "108": {
+        "label": "Wild animals",
+        "type": "tag"
+    },
+    "109": {
+        "label": "Roaring cats (lions, tigers)",
+        "type": "tag"
+    },
+    "110": {
+        "label": "Roar",
+        "type": "tag"
+    },
+    "111": {
+        "label": "Bird",
+        "type": "tag"
+    },
+    "112": {
+        "label": "Bird vocalization, bird call, bird song",
+        "type": "vibe"
+    },
+    "113": {
+        "label": "Chirp, tweet",
+        "type": "tag"
+    },
+    "114": {
+        "label": "Squawk",
+        "type": "tag"
+    },
+    "115": {
+        "label": "Pigeon, dove",
+        "type": "tag"
+    },
+    "116": {
+        "label": "Coo",
+        "type": "tag"
+    },
+    "117": {
+        "label": "Crow",
+        "type": "tag"
+    },
+    "118": {
+        "label": "Caw",
+        "type": "tag"
+    },
+    "119": {
+        "label": "Owl",
+        "type": "tag"
+    },
+    "120": {
+        "label": "Hoot",
+        "type": "tag"
+    },
+    "121": {
+        "label": "Bird flight, flapping wings",
+        "type": "tag"
+    },
+    "122": {
+        "label": "Canidae, dogs, wolves",
+        "type": "tag"
+    },
+    "123": {
+        "label": "Rodents, rats, mice",
+        "type": "tag"
+    },
+    "124": {
+        "label": "Mouse",
+        "type": "tag"
+    },
+    "125": {
+        "label": "Patter",
+        "type": "tag"
+    },
+    "126": {
+        "label": "Insect",
+        "type": "tag"
+    },
+    "127": {
+        "label": "Cricket",
+        "type": "tag"
+    },
+    "128": {
+        "label": "Mosquito",
+        "type": "tag"
+    },
+    "129": {
+        "label": "Fly, housefly",
+        "type": "tag"
+    },
+    "130": {
+        "label": "Buzz",
+        "type": "tag"
+    },
+    "131": {
+        "label": "Bee, wasp, etc.",
+        "type": "tag"
+    },
+    "132": {
+        "label": "Frog",
+        "type": "tag"
+    },
+    "133": {
+        "label": "Croak",
+        "type": "tag"
+    },
+    "134": {
+        "label": "Snake",
+        "type": "tag"
+    },
+    "135": {
+        "label": "Rattle",
+        "type": "tag"
+    },
+    "136": {
+        "label": "Whale vocalization",
+        "type": "tag"
+    },
+    "137": {
+        "label": "Music",
+        "type": "vibe"
+    },
+    "138": {
+        "label": "Musical instrument",
+        "type": "tag"
+    },
+    "139": {
+        "label": "Plucked string instrument",
+        "type": "tag"
+    },
+    "140": {
+        "label": "Guitar",
+        "type": "tag"
+    },
+    "141": {
+        "label": "Electric guitar",
+        "type": "tag"
+    },
+    "142": {
+        "label": "Bass guitar",
+        "type": "tag"
+    },
+    "143": {
+        "label": "Acoustic guitar",
+        "type": "tag"
+    },
+    "144": {
+        "label": "Steel guitar, slide guitar",
+        "type": "tag"
+    },
+    "145": {
+        "label": "Tapping (guitar technique)",
+        "type": "tag"
+    },
+    "146": {
+        "label": "Strum",
+        "type": "tag"
+    },
+    "147": {
+        "label": "Banjo",
+        "type": "tag"
+    },
+    "148": {
+        "label": "Sitar",
+        "type": "tag"
+    },
+    "149": {
+        "label": "Mandolin",
+        "type": "tag"
+    },
+    "150": {
+        "label": "Zither",
+        "type": "tag"
+    },
+    "151": {
+        "label": "Ukulele",
+        "type": "tag"
+    },
+    "152": {
+        "label": "Keyboard (musical)",
+        "type": "tag"
+    },
+    "153": {
+        "label": "Piano",
+        "type": "tag"
+    },
+    "154": {
+        "label": "Electric piano",
+        "type": "tag"
+    },
+    "155": {
+        "label": "Organ",
+        "type": "tag"
+    },
+    "156": {
+        "label": "Electronic organ",
+        "type": "tag"
+    },
+    "157": {
+        "label": "Hammond organ",
+        "type": "tag"
+    },
+    "158": {
+        "label": "Synthesizer",
+        "type": "tag"
+    },
+    "159": {
+        "label": "Sampler",
+        "type": "tag"
+    },
+    "160": {
+        "label": "Harpsichord",
+        "type": "tag"
+    },
+    "161": {
+        "label": "Percussion",
+        "type": "tag"
+    },
+    "162": {
+        "label": "Drum kit",
+        "type": "tag"
+    },
+    "163": {
+        "label": "Drum machine",
+        "type": "tag"
+    },
+    "164": {
+        "label": "Drum",
+        "type": "tag"
+    },
+    "165": {
+        "label": "Snare drum",
+        "type": "tag"
+    },
+    "166": {
+        "label": "Rimshot",
+        "type": "tag"
+    },
+    "167": {
+        "label": "Drum roll",
+        "type": "tag"
+    },
+    "168": {
+        "label": "Bass drum",
+        "type": "tag"
+    },
+    "169": {
+        "label": "Timpani",
+        "type": "tag"
+    },
+    "170": {
+        "label": "Tabla",
+        "type": "tag"
+    },
+    "171": {
+        "label": "Cymbal",
+        "type": "tag"
+    },
+    "172": {
+        "label": "Hi-hat",
+        "type": "tag"
+    },
+    "173": {
+        "label": "Wood block",
+        "type": "tag"
+    },
+    "174": {
+        "label": "Tambourine",
+        "type": "tag"
+    },
+    "175": {
+        "label": "Rattle (instrument)",
+        "type": "tag"
+    },
+    "176": {
+        "label": "Maraca",
+        "type": "tag"
+    },
+    "177": {
+        "label": "Gong",
+        "type": "tag"
+    },
+    "178": {
+        "label": "Tubular bells",
+        "type": "tag"
+    },
+    "179": {
+        "label": "Mallet percussion",
+        "type": "tag"
+    },
+    "180": {
+        "label": "Marimba, xylophone",
+        "type": "tag"
+    },
+    "181": {
+        "label": "Glockenspiel",
+        "type": "tag"
+    },
+    "182": {
+        "label": "Vibraphone",
+        "type": "tag"
+    },
+    "183": {
+        "label": "Steelpan",
+        "type": "tag"
+    },
+    "184": {
+        "label": "Orchestra",
+        "type": "tag"
+    },
+    "185": {
+        "label": "Brass instrument",
+        "type": "tag"
+    },
+    "186": {
+        "label": "French horn",
+        "type": "tag"
+    },
+    "187": {
+        "label": "Trumpet",
+        "type": "tag"
+    },
+    "188": {
+        "label": "Trombone",
+        "type": "tag"
+    },
+    "189": {
+        "label": "Bowed string instrument",
+        "type": "tag"
+    },
+    "190": {
+        "label": "String section",
+        "type": "tag"
+    },
+    "191": {
+        "label": "Violin, fiddle",
+        "type": "tag"
+    },
+    "192": {
+        "label": "Pizzicato",
+        "type": "tag"
+    },
+    "193": {
+        "label": "Cello",
+        "type": "tag"
+    },
+    "194": {
+        "label": "Double bass",
+        "type": "tag"
+    },
+    "195": {
+        "label": "Wind instrument, woodwind instrument",
+        "type": "tag"
+    },
+    "196": {
+        "label": "Flute",
+        "type": "tag"
+    },
+    "197": {
+        "label": "Saxophone",
+        "type": "tag"
+    },
+    "198": {
+        "label": "Clarinet",
+        "type": "tag"
+    },
+    "199": {
+        "label": "Harp",
+        "type": "tag"
+    },
+    "200": {
+        "label": "Bell",
+        "type": "tag"
+    },
+    "201": {
+        "label": "Church bell",
+        "type": "tag"
+    },
+    "202": {
+        "label": "Jingle bell",
+        "type": "vibe"
+    },
+    "203": {
+        "label": "Bicycle bell",
+        "type": "tag"
+    },
+    "204": {
+        "label": "Tuning fork",
+        "type": "tag"
+    },
+    "205": {
+        "label": "Chime",
+        "type": "tag"
+    },
+    "206": {
+        "label": "Wind chime",
+        "type": "tag"
+    },
+    "207": {
+        "label": "Change ringing (campanology)",
+        "type": "tag"
+    },
+    "208": {
+        "label": "Harmonica",
+        "type": "tag"
+    },
+    "209": {
+        "label": "Accordion",
+        "type": "tag"
+    },
+    "210": {
+        "label": "Bagpipes",
+        "type": "tag"
+    },
+    "211": {
+        "label": "Didgeridoo",
+        "type": "tag"
+    },
+    "212": {
+        "label": "Shofar",
+        "type": "tag"
+    },
+    "213": {
+        "label": "Theremin",
+        "type": "tag"
+    },
+    "214": {
+        "label": "Singing bowl",
+        "type": "tag"
+    },
+    "215": {
+        "label": "Scratching (performance technique)",
+        "type": "tag"
+    },
+    "216": {
+        "label": "Pop music",
+        "type": "vibe"
+    },
+    "217": {
+        "label": "Hip hop music",
+        "type": "vibe"
+    },
+    "218": {
+        "label": "Beatboxing",
+        "type": "tag"
+    },
+    "219": {
+        "label": "Rock music",
+        "type": "vibe"
+    },
+    "220": {
+        "label": "Heavy metal",
+        "type": "vibe"
+    },
+    "221": {
+        "label": "Punk rock",
+        "type": "vibe"
+    },
+    "222": {
+        "label": "Grunge",
+        "type": "vibe"
+    },
+    "223": {
+        "label": "Progressive rock",
+        "type": "vibe"
+    },
+    "224": {
+        "label": "Rock and roll",
+        "type": "vibe"
+    },
+    "225": {
+        "label": "Psychedelic rock",
+        "type": "vibe"
+    },
+    "226": {
+        "label": "Rhythm and blues",
+        "type": "vibe"
+    },
+    "227": {
+        "label": "Soul music",
+        "type": "vibe"
+    },
+    "228": {
+        "label": "Reggae",
+        "type": "vibe"
+    },
+    "229": {
+        "label": "Country",
+        "type": "vibe"
+    },
+    "230": {
+        "label": "Swing music",
+        "type": "vibe"
+    },
+    "231": {
+        "label": "Bluegrass",
+        "type": "vibe"
+    },
+    "232": {
+        "label": "Funk",
+        "type": "vibe"
+    },
+    "233": {
+        "label": "Folk music",
+        "type": "vibe"
+    },
+    "234": {
+        "label": "Middle Eastern music",
+        "type": "vibe"
+    },
+    "235": {
+        "label": "Jazz",
+        "type": "vibe"
+    },
+    "236": {
+        "label": "Disco",
+        "type": "vibe"
+    },
+    "237": {
+        "label": "Classical music",
+        "type": "vibe"
+    },
+    "238": {
+        "label": "Opera",
+        "type": "vibe"
+    },
+    "239": {
+        "label": "Electronic music",
+        "type": "vibe"
+    },
+    "240": {
+        "label": "House music",
+        "type": "vibe"
+    },
+    "241": {
+        "label": "Techno",
+        "type": "vibe"
+    },
+    "242": {
+        "label": "Dubstep",
+        "type": "vibe"
+    },
+    "243": {
+        "label": "Drum and bass",
+        "type": "tag"
+    },
+    "244": {
+        "label": "Electronica",
+        "type": "vibe"
+    },
+    "245": {
+        "label": "Electronic dance music",
+        "type": "vibe"
+    },
+    "246": {
+        "label": "Ambient music",
+        "type": "vibe"
+    },
+    "247": {
+        "label": "Trance music",
+        "type": "vibe"
+    },
+    "248": {
+        "label": "Music of Latin America",
+        "type": "vibe"
+    },
+    "249": {
+        "label": "Salsa music",
+        "type": "vibe"
+    },
+    "250": {
+        "label": "Flamenco",
+        "type": "vibe"
+    },
+    "251": {
+        "label": "Blues",
+        "type": "vibe"
+    },
+    "252": {
+        "label": "Music for children",
+        "type": "vibe"
+    },
+    "253": {
+        "label": "New-age music",
+        "type": "vibe"
+    },
+    "254": {
+        "label": "Vocal music",
+        "type": "vibe"
+    },
+    "255": {
+        "label": "A capella",
+        "type": "vibe"
+    },
+    "256": {
+        "label": "Music of Africa",
+        "type": "vibe"
+    },
+    "257": {
+        "label": "Afrobeat",
+        "type": "vibe"
+    },
+    "258": {
+        "label": "Christian music",
+        "type": "vibe"
+    },
+    "259": {
+        "label": "Gospel music",
+        "type": "vibe"
+    },
+    "260": {
+        "label": "Music of Asia",
+        "type": "vibe"
+    },
+    "261": {
+        "label": "Carnatic music",
+        "type": "vibe"
+    },
+    "262": {
+        "label": "Music of Bollywood",
+        "type": "vibe"
+    },
+    "263": {
+        "label": "Ska",
+        "type": "vibe"
+    },
+    "264": {
+        "label": "Traditional music",
+        "type": "vibe"
+    },
+    "265": {
+        "label": "Independent music",
+        "type": "vibe"
+    },
+    "266": {
+        "label": "Song",
+        "type": "vibe"
+    },
+    "267": {
+        "label": "Background music",
+        "type": "vibe"
+    },
+    "268": {
+        "label": "Theme music",
+        "type": "vibe"
+    },
+    "269": {
+        "label": "Jingle (music)",
+        "type": "vibe"
+    },
+    "270": {
+        "label": "Soundtrack music",
+        "type": "vibe"
+    },
+    "271": {
+        "label": "Lullaby",
+        "type": "vibe"
+    },
+    "272": {
+        "label": "Video game music",
+        "type": "vibe"
+    },
+    "273": {
+        "label": "Christmas music",
+        "type": "vibe"
+    },
+    "274": {
+        "label": "Dance music",
+        "type": "vibe"
+    },
+    "275": {
+        "label": "Wedding music",
+        "type": "vibe"
+    },
+    "276": {
+        "label": "Happy music",
+        "type": "vibe"
+    },
+    "277": {
+        "label": "Funny music",
+        "type": "vibe"
+    },
+    "278": {
+        "label": "Sad music",
+        "type": "vibe"
+    },
+    "279": {
+        "label": "Tender music",
+        "type": "vibe"
+    },
+    "280": {
+        "label": "Exciting music",
+        "type": "vibe"
+    },
+    "281": {
+        "label": "Angry music",
+        "type": "vibe"
+    },
+    "282": {
+        "label": "Scary music",
+        "type": "vibe"
+    },
+    "283": {
+        "label": "Wind",
+        "type": "tag"
+    },
+    "284": {
+        "label": "Rustling leaves",
+        "type": "tag"
+    },
+    "285": {
+        "label": "Wind noise (microphone)",
+        "type": "vibe"
+    },
+    "286": {
+        "label": "Thunderstorm",
+        "type": "tag"
+    },
+    "287": {
+        "label": "Thunder",
+        "type": "tag"
+    },
+    "288": {
+        "label": "Water",
+        "type": "tag"
+    },
+    "289": {
+        "label": "Rain",
+        "type": "tag"
+    },
+    "290": {
+        "label": "Raindrop",
+        "type": "tag"
+    },
+    "291": {
+        "label": "Rain on surface",
+        "type": "tag"
+    },
+    "292": {
+        "label": "Stream",
+        "type": "tag"
+    },
+    "293": {
+        "label": "Waterfall",
+        "type": "tag"
+    },
+    "294": {
+        "label": "Ocean",
+        "type": "tag"
+    },
+    "295": {
+        "label": "Waves, surf",
+        "type": "tag"
+    },
+    "296": {
+        "label": "Steam",
+        "type": "tag"
+    },
+    "297": {
+        "label": "Gurgling",
+        "type": "tag"
+    },
+    "298": {
+        "label": "Fire",
+        "type": "tag"
+    },
+    "299": {
+        "label": "Crackle",
+        "type": "tag"
+    },
+    "300": {
+        "label": "Vehicle",
+        "type": "tag"
+    },
+    "301": {
+        "label": "Boat, Water vehicle",
+        "type": "tag"
+    },
+    "302": {
+        "label": "Sailboat, sailing ship",
+        "type": "tag"
+    },
+    "303": {
+        "label": "Rowboat, canoe, kayak",
+        "type": "tag"
+    },
+    "304": {
+        "label": "Motorboat, speedboat",
+        "type": "tag"
+    },
+    "305": {
+        "label": "Ship",
+        "type": "tag"
+    },
+    "306": {
+        "label": "Motor vehicle (road)",
+        "type": "tag"
+    },
+    "307": {
+        "label": "Car",
+        "type": "tag"
+    },
+    "308": {
+        "label": "Vehicle horn, car horn, honking",
+        "type": "tag"
+    },
+    "309": {
+        "label": "Toot",
+        "type": "tag"
+    },
+    "310": {
+        "label": "Car alarm",
+        "type": "tag"
+    },
+    "311": {
+        "label": "Power windows, electric windows",
+        "type": "tag"
+    },
+    "312": {
+        "label": "Skidding",
+        "type": "tag"
+    },
+    "313": {
+        "label": "Tire squeal",
+        "type": "tag"
+    },
+    "314": {
+        "label": "Car passing by",
+        "type": "tag"
+    },
+    "315": {
+        "label": "Race car, auto racing",
+        "type": "tag"
+    },
+    "316": {
+        "label": "Truck",
+        "type": "tag"
+    },
+    "317": {
+        "label": "Air brake",
+        "type": "tag"
+    },
+    "318": {
+        "label": "Air horn, truck horn",
+        "type": "tag"
+    },
+    "319": {
+        "label": "Reversing beeps",
+        "type": "tag"
+    },
+    "320": {
+        "label": "Ice cream truck, ice cream van",
+        "type": "tag"
+    },
+    "321": {
+        "label": "Bus",
+        "type": "tag"
+    },
+    "322": {
+        "label": "Emergency vehicle",
+        "type": "tag"
+    },
+    "323": {
+        "label": "Police car (siren)",
+        "type": "tag"
+    },
+    "324": {
+        "label": "Ambulance (siren)",
+        "type": "tag"
+    },
+    "325": {
+        "label": "Fire engine, fire truck (siren)",
+        "type": "tag"
+    },
+    "326": {
+        "label": "Motorcycle",
+        "type": "tag"
+    },
+    "327": {
+        "label": "Traffic noise, roadway noise",
+        "type": "vibe"
+    },
+    "328": {
+        "label": "Rail transport",
+        "type": "tag"
+    },
+    "329": {
+        "label": "Train",
+        "type": "tag"
+    },
+    "330": {
+        "label": "Train whistle",
+        "type": "tag"
+    },
+    "331": {
+        "label": "Train horn",
+        "type": "tag"
+    },
+    "332": {
+        "label": "Railroad car, train wagon",
+        "type": "tag"
+    },
+    "333": {
+        "label": "Train wheels squealing",
+        "type": "tag"
+    },
+    "334": {
+        "label": "Subway, metro, underground",
+        "type": "tag"
+    },
+    "335": {
+        "label": "Aircraft",
+        "type": "tag"
+    },
+    "336": {
+        "label": "Aircraft engine",
+        "type": "tag"
+    },
+    "337": {
+        "label": "Jet engine",
+        "type": "tag"
+    },
+    "338": {
+        "label": "Propeller, airscrew",
+        "type": "tag"
+    },
+    "339": {
+        "label": "Helicopter",
+        "type": "tag"
+    },
+    "340": {
+        "label": "Fixed-wing aircraft, airplane",
+        "type": "tag"
+    },
+    "341": {
+        "label": "Bicycle",
+        "type": "tag"
+    },
+    "342": {
+        "label": "Skateboard",
+        "type": "tag"
+    },
+    "343": {
+        "label": "Engine",
+        "type": "tag"
+    },
+    "344": {
+        "label": "Light engine (high frequency)",
+        "type": "tag"
+    },
+    "345": {
+        "label": "Dental drill, dentist's drill",
+        "type": "tag"
+    },
+    "346": {
+        "label": "Lawn mower",
+        "type": "tag"
+    },
+    "347": {
+        "label": "Chainsaw",
+        "type": "tag"
+    },
+    "348": {
+        "label": "Medium engine (mid frequency)",
+        "type": "tag"
+    },
+    "349": {
+        "label": "Heavy engine (low frequency)",
+        "type": "tag"
+    },
+    "350": {
+        "label": "Engine knocking",
+        "type": "tag"
+    },
+    "351": {
+        "label": "Engine starting",
+        "type": "tag"
+    },
+    "352": {
+        "label": "Idling",
+        "type": "tag"
+    },
+    "353": {
+        "label": "Accelerating, revving, vroom",
+        "type": "tag"
+    },
+    "354": {
+        "label": "Door",
+        "type": "tag"
+    },
+    "355": {
+        "label": "Doorbell",
+        "type": "tag"
+    },
+    "356": {
+        "label": "Ding-dong",
+        "type": "tag"
+    },
+    "357": {
+        "label": "Sliding door",
+        "type": "tag"
+    },
+    "358": {
+        "label": "Slam",
+        "type": "tag"
+    },
+    "359": {
+        "label": "Knock",
+        "type": "tag"
+    },
+    "360": {
+        "label": "Tap",
+        "type": "tag"
+    },
+    "361": {
+        "label": "Squeak",
+        "type": "tag"
+    },
+    "362": {
+        "label": "Cupboard open or close",
+        "type": "tag"
+    },
+    "363": {
+        "label": "Drawer open or close",
+        "type": "tag"
+    },
+    "364": {
+        "label": "Dishes, pots, and pans",
+        "type": "tag"
+    },
+    "365": {
+        "label": "Cutlery, silverware",
+        "type": "tag"
+    },
+    "366": {
+        "label": "Chopping (food)",
+        "type": "tag"
+    },
+    "367": {
+        "label": "Frying (food)",
+        "type": "tag"
+    },
+    "368": {
+        "label": "Microwave oven",
+        "type": "tag"
+    },
+    "369": {
+        "label": "Blender",
+        "type": "tag"
+    },
+    "370": {
+        "label": "Water tap, faucet",
+        "type": "tag"
+    },
+    "371": {
+        "label": "Sink (filling or washing)",
+        "type": "tag"
+    },
+    "372": {
+        "label": "Bathtub (filling or washing)",
+        "type": "tag"
+    },
+    "373": {
+        "label": "Hair dryer",
+        "type": "tag"
+    },
+    "374": {
+        "label": "Toilet flush",
+        "type": "tag"
+    },
+    "375": {
+        "label": "Toothbrush",
+        "type": "tag"
+    },
+    "376": {
+        "label": "Electric toothbrush",
+        "type": "tag"
+    },
+    "377": {
+        "label": "Vacuum cleaner",
+        "type": "tag"
+    },
+    "378": {
+        "label": "Zipper (clothing)",
+        "type": "tag"
+    },
+    "379": {
+        "label": "Keys jangling",
+        "type": "tag"
+    },
+    "380": {
+        "label": "Coin (dropping)",
+        "type": "tag"
+    },
+    "381": {
+        "label": "Scissors",
+        "type": "tag"
+    },
+    "382": {
+        "label": "Electric shaver, electric razor",
+        "type": "tag"
+    },
+    "383": {
+        "label": "Shuffling cards",
+        "type": "tag"
+    },
+    "384": {
+        "label": "Typing",
+        "type": "tag"
+    },
+    "385": {
+        "label": "Typewriter",
+        "type": "tag"
+    },
+    "386": {
+        "label": "Computer keyboard",
+        "type": "tag"
+    },
+    "387": {
+        "label": "Writing",
+        "type": "tag"
+    },
+    "388": {
+        "label": "Alarm",
+        "type": "tag"
+    },
+    "389": {
+        "label": "Telephone",
+        "type": "tag"
+    },
+    "390": {
+        "label": "Telephone bell ringing",
+        "type": "tag"
+    },
+    "391": {
+        "label": "Ringtone",
+        "type": "tag"
+    },
+    "392": {
+        "label": "Telephone dialing, DTMF",
+        "type": "tag"
+    },
+    "393": {
+        "label": "Dial tone",
+        "type": "tag"
+    },
+    "394": {
+        "label": "Busy signal",
+        "type": "tag"
+    },
+    "395": {
+        "label": "Alarm clock",
+        "type": "tag"
+    },
+    "396": {
+        "label": "Siren",
+        "type": "tag"
+    },
+    "397": {
+        "label": "Civil defense siren",
+        "type": "tag"
+    },
+    "398": {
+        "label": "Buzzer",
+        "type": "tag"
+    },
+    "399": {
+        "label": "Smoke detector, smoke alarm",
+        "type": "tag"
+    },
+    "400": {
+        "label": "Fire alarm",
+        "type": "tag"
+    },
+    "401": {
+        "label": "Foghorn",
+        "type": "tag"
+    },
+    "402": {
+        "label": "Whistle",
+        "type": "tag"
+    },
+    "403": {
+        "label": "Steam whistle",
+        "type": "tag"
+    },
+    "404": {
+        "label": "Mechanisms",
+        "type": "tag"
+    },
+    "405": {
+        "label": "Ratchet, pawl",
+        "type": "tag"
+    },
+    "406": {
+        "label": "Clock",
+        "type": "tag"
+    },
+    "407": {
+        "label": "Tick",
+        "type": "tag"
+    },
+    "408": {
+        "label": "Tick-tock",
+        "type": "tag"
+    },
+    "409": {
+        "label": "Gears",
+        "type": "tag"
+    },
+    "410": {
+        "label": "Pulleys",
+        "type": "tag"
+    },
+    "411": {
+        "label": "Sewing machine",
+        "type": "tag"
+    },
+    "412": {
+        "label": "Mechanical fan",
+        "type": "tag"
+    },
+    "413": {
+        "label": "Air conditioning",
+        "type": "tag"
+    },
+    "414": {
+        "label": "Cash register",
+        "type": "tag"
+    },
+    "415": {
+        "label": "Printer",
+        "type": "tag"
+    },
+    "416": {
+        "label": "Camera",
+        "type": "tag"
+    },
+    "417": {
+        "label": "Single-lens reflex camera",
+        "type": "tag"
+    },
+    "418": {
+        "label": "Tools",
+        "type": "tag"
+    },
+    "419": {
+        "label": "Hammer",
+        "type": "tag"
+    },
+    "420": {
+        "label": "Jackhammer",
+        "type": "tag"
+    },
+    "421": {
+        "label": "Sawing",
+        "type": "tag"
+    },
+    "422": {
+        "label": "Filing (rasp)",
+        "type": "tag"
+    },
+    "423": {
+        "label": "Sanding",
+        "type": "tag"
+    },
+    "424": {
+        "label": "Power tool",
+        "type": "tag"
+    },
+    "425": {
+        "label": "Drill",
+        "type": "tag"
+    },
+    "426": {
+        "label": "Explosion",
+        "type": "tag"
+    },
+    "427": {
+        "label": "Gunshot, gunfire",
+        "type": "tag"
+    },
+    "428": {
+        "label": "Machine gun",
+        "type": "tag"
+    },
+    "429": {
+        "label": "Fusillade",
+        "type": "tag"
+    },
+    "430": {
+        "label": "Artillery fire",
+        "type": "tag"
+    },
+    "431": {
+        "label": "Cap gun",
+        "type": "tag"
+    },
+    "432": {
+        "label": "Fireworks",
+        "type": "tag"
+    },
+    "433": {
+        "label": "Firecracker",
+        "type": "tag"
+    },
+    "434": {
+        "label": "Burst, pop",
+        "type": "vibe"
+    },
+    "435": {
+        "label": "Eruption",
+        "type": "tag"
+    },
+    "436": {
+        "label": "Boom",
+        "type": "tag"
+    },
+    "437": {
+        "label": "Wood",
+        "type": "tag"
+    },
+    "438": {
+        "label": "Chop",
+        "type": "tag"
+    },
+    "439": {
+        "label": "Splinter",
+        "type": "tag"
+    },
+    "440": {
+        "label": "Crack",
+        "type": "tag"
+    },
+    "441": {
+        "label": "Glass",
+        "type": "tag"
+    },
+    "442": {
+        "label": "Chink, clink",
+        "type": "tag"
+    },
+    "443": {
+        "label": "Shatter",
+        "type": "tag"
+    },
+    "444": {
+        "label": "Liquid",
+        "type": "tag"
+    },
+    "445": {
+        "label": "Splash, splatter",
+        "type": "tag"
+    },
+    "446": {
+        "label": "Slosh",
+        "type": "tag"
+    },
+    "447": {
+        "label": "Squish",
+        "type": "tag"
+    },
+    "448": {
+        "label": "Drip",
+        "type": "tag"
+    },
+    "449": {
+        "label": "Pour",
+        "type": "tag"
+    },
+    "450": {
+        "label": "Trickle, dribble",
+        "type": "tag"
+    },
+    "451": {
+        "label": "Gush",
+        "type": "tag"
+    },
+    "452": {
+        "label": "Fill (with liquid)",
+        "type": "tag"
+    },
+    "453": {
+        "label": "Spray",
+        "type": "tag"
+    },
+    "454": {
+        "label": "Pump (liquid)",
+        "type": "tag"
+    },
+    "455": {
+        "label": "Stir",
+        "type": "tag"
+    },
+    "456": {
+        "label": "Boiling",
+        "type": "tag"
+    },
+    "457": {
+        "label": "Sonar",
+        "type": "tag"
+    },
+    "458": {
+        "label": "Arrow",
+        "type": "tag"
+    },
+    "459": {
+        "label": "Whoosh, swoosh, swish",
+        "type": "tag"
+    },
+    "460": {
+        "label": "Thump, thud",
+        "type": "tag"
+    },
+    "461": {
+        "label": "Thunk",
+        "type": "tag"
+    },
+    "462": {
+        "label": "Electronic tuner",
+        "type": "tag"
+    },
+    "463": {
+        "label": "Effects unit",
+        "type": "tag"
+    },
+    "464": {
+        "label": "Chorus effect",
+        "type": "tag"
+    },
+    "465": {
+        "label": "Basketball bounce",
+        "type": "tag"
+    },
+    "466": {
+        "label": "Bang",
+        "type": "tag"
+    },
+    "467": {
+        "label": "Slap, smack",
+        "type": "tag"
+    },
+    "468": {
+        "label": "Whack, thwack",
+        "type": "tag"
+    },
+    "469": {
+        "label": "Smash, crash",
+        "type": "tag"
+    },
+    "470": {
+        "label": "Breaking",
+        "type": "tag"
+    },
+    "471": {
+        "label": "Bouncing",
+        "type": "tag"
+    },
+    "472": {
+        "label": "Whip",
+        "type": "tag"
+    },
+    "473": {
+        "label": "Flap",
+        "type": "tag"
+    },
+    "474": {
+        "label": "Scratch",
+        "type": "tag"
+    },
+    "475": {
+        "label": "Scrape",
+        "type": "tag"
+    },
+    "476": {
+        "label": "Rub",
+        "type": "tag"
+    },
+    "477": {
+        "label": "Roll",
+        "type": "tag"
+    },
+    "478": {
+        "label": "Crushing",
+        "type": "tag"
+    },
+    "479": {
+        "label": "Crumpling, crinkling",
+        "type": "tag"
+    },
+    "480": {
+        "label": "Tearing",
+        "type": "tag"
+    },
+    "481": {
+        "label": "Beep, bleep",
+        "type": "tag"
+    },
+    "482": {
+        "label": "Ping",
+        "type": "tag"
+    },
+    "483": {
+        "label": "Ding",
+        "type": "tag"
+    },
+    "484": {
+        "label": "Clang",
+        "type": "tag"
+    },
+    "485": {
+        "label": "Squeal",
+        "type": "tag"
+    },
+    "486": {
+        "label": "Creak",
+        "type": "tag"
+    },
+    "487": {
+        "label": "Rustle",
+        "type": "tag"
+    },
+    "488": {
+        "label": "Whir",
+        "type": "tag"
+    },
+    "489": {
+        "label": "Clatter",
+        "type": "tag"
+    },
+    "490": {
+        "label": "Sizzle",
+        "type": "tag"
+    },
+    "491": {
+        "label": "Clicking",
+        "type": "tag"
+    },
+    "492": {
+        "label": "Clickety-clack",
+        "type": "tag"
+    },
+    "493": {
+        "label": "Rumble",
+        "type": "tag"
+    },
+    "494": {
+        "label": "Plop",
+        "type": "tag"
+    },
+    "495": {
+        "label": "Jingle, tinkle",
+        "type": "vibe"
+    },
+    "496": {
+        "label": "Hum",
+        "type": "tag"
+    },
+    "497": {
+        "label": "Zing",
+        "type": "tag"
+    },
+    "498": {
+        "label": "Boing",
+        "type": "tag"
+    },
+    "499": {
+        "label": "Crunch",
+        "type": "tag"
+    },
+    "500": {
+        "label": "Silence",
+        "type": "vibe"
+    },
+    "501": {
+        "label": "Sine wave",
+        "type": "tag"
+    },
+    "502": {
+        "label": "Harmonic",
+        "type": "tag"
+    },
+    "503": {
+        "label": "Chirp tone",
+        "type": "tag"
+    },
+    "504": {
+        "label": "Sound effect",
+        "type": "tag"
+    },
+    "505": {
+        "label": "Pulse",
+        "type": "tag"
+    },
+    "506": {
+        "label": "Inside, small room",
+        "type": "vibe"
+    },
+    "507": {
+        "label": "Inside, large room or hall",
+        "type": "vibe"
+    },
+    "508": {
+        "label": "Inside, public space",
+        "type": "vibe"
+    },
+    "509": {
+        "label": "Outside, urban or manmade",
+        "type": "vibe"
+    },
+    "510": {
+        "label": "Outside, rural or natural",
+        "type": "vibe"
+    },
+    "511": {
+        "label": "Reverberation",
+        "type": "vibe"
+    },
+    "512": {
+        "label": "Echo",
+        "type": "vibe"
+    },
+    "513": {
+        "label": "Noise",
+        "type": "vibe"
+    },
+    "514": {
+        "label": "Environmental noise",
+        "type": "vibe"
+    },
+    "515": {
+        "label": "Static",
+        "type": "vibe"
+    },
+    "516": {
+        "label": "Mains hum",
+        "type": "tag"
+    },
+    "517": {
+        "label": "Distortion",
+        "type": "vibe"
+    },
+    "518": {
+        "label": "Sidetone",
+        "type": "tag"
+    },
+    "519": {
+        "label": "Cacophony",
+        "type": "vibe"
+    },
+    "520": {
+        "label": "White noise",
+        "type": "vibe"
+    },
+    "521": {
+        "label": "Pink noise",
+        "type": "vibe"
+    },
+    "522": {
+        "label": "Throbbing",
+        "type": "tag"
+    },
+    "523": {
+        "label": "Vibration",
+        "type": "tag"
+    },
+    "524": {
+        "label": "Television",
+        "type": "tag"
+    },
+    "525": {
+        "label": "Radio",
+        "type": "tag"
+    },
+    "526": {
+        "label": "Field recording",
+        "type": "vibe"
+    }
+}

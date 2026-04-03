@@ -15,3 +15,7 @@ scenedetect[opencv]
 fiftyone
 decord
 qwen-vl-utils
+
+bitsandbytes
+evaluate
+datasets

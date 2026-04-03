@@ -19,7 +19,6 @@ VEA_algo is an advanced video processing pipeline that builds on the structural 
 
 ```bash
 pip install -r requirements.txt
-apt-get install -y ffmpeg
 ```
 
 ---
@@ -106,6 +105,7 @@ Options:
 - `--skip_cut_video` — skip cutting video into clips
 - `--skip_visual_caption` — skip Qwen3-VL visual analysis
 - `--skip_scene_caption` — skip OpenAI scene caption generation
+- `--skip_audio_tagging` - skip BEATs audio tagging
 
 Output per video folder:
 ```

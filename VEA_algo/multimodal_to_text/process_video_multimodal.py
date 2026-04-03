@@ -106,7 +106,7 @@ class Prompter:
         self.skip_cut_video = args.skip_cut_video
         self.skip_visual_caption = args.skip_visual_caption
         self.skip_scene_caption = args.skip_scene_caption
-        # self.skip_audio = args.skip_audio
+        self.skip_audio = args.skip_audio
         
         # Get all video directory paths, optionally limited
         all_video_dirs = sorted([d for d in self.root_dir.iterdir() if d.is_dir()])
@@ -120,6 +120,11 @@ class Prompter:
                 self.videos.append(mp4_files[0])
 
         self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+        self.base_dir = Path(__file__).resolve().parent
+        self.beat_checkpoint_path = self.base_dir / "beats_checkpoints" / "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
+        self.beat_config_json_path = self.base_dir / "beats" / "config.json"
+
 
     def _clean_memory(self):
         """
@@ -298,7 +303,7 @@ class Prompter:
                 if clip_path is None:
                     continue
 
-                texts    = scene.get("text", [])
+                texts = scene.get("text", [])
                 speakers = scene.get("speaker", [])
                 transcript = [
                     {"speaker": sp, "text": t}
@@ -448,6 +453,74 @@ class Prompter:
 
         return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
 
+    ## --------------------
+    ## 5. Audio Tagging
+    ## --------------------
+    def _audio_tagging(self):
+        current_dir = Path(__file__).resolve().parent
+        beats_folder = current_dir / "beats"
+        
+        if str(beats_folder) not in sys.path:
+            sys.path.insert(0, str(beats_folder))
+        from infer_beats import load_model, audio_tagging
+        model, config_data = load_model(self.beat_checkpoint_path, self.beat_config_json_path)
+
+        for video_dir, video_path in zip(self.video_dirs, self.videos):
+            segment_file = video_dir / self.segmentation_filename
+            if not segment_file.exists():
+                continue
+            
+            with open(segment_file, 'r', encoding='utf-8') as f:
+                segments = json.load(f)
+
+            if all("audio_tags" in seg for seg in segments):
+                print(f"Skipping audio tagging for {video_dir.name}, already processed.")
+                continue
+
+            clips_dir = video_dir / self.clips_directory
+            
+            for i, seg in enumerate(segments):
+                start_list = seg["start"]
+                end_list = seg["end"]
+
+                clip_start = start_list[0] if isinstance(start_list, list) else start_list
+                clip_end = end_list[-1] if isinstance(end_list, list) else end_list
+
+                clip_name = f"clip_{i:03d}_{clip_start:.2f}-{clip_end:.2f}.mp4"
+                clip_path = clips_dir / clip_name
+
+                if not clip_path.exists():
+                    print(f"Clip not found, skipping scene {i}: {clip_path.name}")
+                    continue
+
+                # Extract audio of each clip
+                audio_path = clips_dir / f"audio_{i:03d}_{clip_start:.2f}-{clip_end:.2f}.wav"
+                print(f"Extracting audio from: {clip_path.name}")
+                
+                command = [
+                    'ffmpeg', '-y', '-i', str(clip_path),
+                    '-vn', '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000',
+                    '-loglevel', 'error', str(audio_path)
+                ]
+
+                try:
+                    subprocess.run(command, check=True, capture_output=True)
+                    print(f"Successfully extracted: {audio_path}")
+                    results = audio_tagging(str(audio_path), model, config_data, top_k=2)
+                    seg["audio_tags"] = [item["label"] for item in results.get("audio_tags", [])]
+                    seg["audio_vibes"] = [item["label"] for item in results.get("audio_vibes", [])]
+
+                except Exception as e:
+                    print(f"Error at Scene {i}: {e}")
+                finally:
+                    if audio_path.exists():
+                        audio_path.unlink()
+
+            with open(segment_file, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2, ensure_ascii=False)
+        
+        del model
+        self._clean_memory()
 
     def run(self):
         """
@@ -472,6 +545,10 @@ class Prompter:
             if not self.skip_scene_caption:
                 print("\n--- Step 4: Generate Scene Caption Corpus ---")
                 self._generate_scene_captions()
+
+            if not self.skip_audio:
+                print("\n--- Step 5: Audio Tagging ---")
+                self._audio_tagging()
 
             print(f"\nAll processing steps completed in {time.time() - start_time:.2f} seconds.")
 
@@ -500,7 +577,7 @@ if __name__ == '__main__':
     parser.add_argument('--skip_cut_video', action='store_true', help="Skip cut video into clips.")
     parser.add_argument('--skip_visual_caption', action='store_true', help="Skip visual caption generation.")
     parser.add_argument('--skip_scene_caption', action='store_true', help="Skip scene caption generation.")
-    # parser.add_argument('--skip_audio', action='store_true', help="Skip audio tagging.")
+    parser.add_argument('--skip_audio', action='store_true', help="Skip audio tagging.")
 
     args = parser.parse_args()
 
