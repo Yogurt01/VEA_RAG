@@ -6,7 +6,7 @@ import torch
 from datetime import datetime
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import PeftModel
 
 sys.path.append(str(Path(__file__).parent / "RSTParser_EACL24" / "src"))
 from data.tree import AttachTree
@@ -18,11 +18,11 @@ HUGGING_FACE_TOKEN = os.environ.get('HUGGING_FACE_TOKEN')
 
 class RSTTreeParser:
     def __init__(self, args):
-        self.base_model_name       = args.base_model_name
+        self.base_model_name = args.base_model_name
         self.model_size = args.model_size
-        self.parse_type   = args.parse_type
-        self.rel_type     = args.rel_type
-        self.corpus       = args.corpus
+        self.parse_type = args.parse_type
+        self.rel_type = args.rel_type
+        self.corpus = args.corpus
         self.dataset_file = Path(args.dataset_file)
 
         self.model_type_list = self._get_model_type_list()
@@ -50,11 +50,11 @@ class RSTTreeParser:
         num_new = tokenizer.add_special_tokens(special_tokens_dict)
         model.resize_token_embeddings(len(tokenizer))
         if num_new > 0:
-            input_embeddings_data  = model.get_input_embeddings().weight.data
+            input_embeddings_data = model.get_input_embeddings().weight.data
             output_embeddings_data = model.get_output_embeddings().weight.data
-            input_embeddings_avg   = input_embeddings_data[:-num_new].mean(dim=0, keepdim=True)
-            output_embeddings_avg  = output_embeddings_data[:-num_new].mean(dim=0, keepdim=True)
-            input_embeddings_data[-num_new:]  = input_embeddings_avg
+            input_embeddings_avg = input_embeddings_data[:-num_new].mean(dim=0, keepdim=True)
+            output_embeddings_avg = output_embeddings_data[:-num_new].mean(dim=0, keepdim=True)
+            input_embeddings_data[-num_new:] = input_embeddings_avg
             output_embeddings_data[-num_new:] = output_embeddings_avg
 
     def load_model(self):
@@ -79,11 +79,11 @@ class RSTTreeParser:
         # Build HF Hub IDs từ corpus + model_size
         hf_prefix = f"arumaekawa/{self.corpus}-{self.model_size}"
         adapter_hub_ids = {
-            "span":         f"{hf_prefix}-span",
-            "top_down":     f"{hf_prefix}-top_down",
-            "nuc":          f"{hf_prefix}-nuc",
-            "rel":          f"{hf_prefix}-rel",
-            "nuc_rel":      f"{hf_prefix}-nuc_rel",
+            "span": f"{hf_prefix}-span",
+            "top_down": f"{hf_prefix}-top_down",
+            "nuc": f"{hf_prefix}-nuc",
+            "rel": f"{hf_prefix}-rel",
+            "nuc_rel": f"{hf_prefix}-nuc_rel",
             "rel_with_nuc": f"{hf_prefix}-rel_with_nuc",
         }
 
@@ -91,7 +91,7 @@ class RSTTreeParser:
         peft_model = None
         for model_type in self.model_type_list:
             hub_id = adapter_hub_ids[model_type]
-            print(f"  → {hub_id}")
+            print(f" → {hub_id}")
             if peft_model is None:
                 peft_model = PeftModel.from_pretrained(
                     base_model, hub_id,
@@ -138,10 +138,10 @@ class RSTTreeParser:
 
     def run(self):
         print("=" * 80)
-        print(f"parse_type  : {self.parse_type}")
-        print(f"rel_type    : {self.rel_type}")
-        print(f"corpus      : {self.corpus}")
-        print(f"adapters    : {self.model_type_list}")
+        print(f"parse_type : {self.parse_type}")
+        print(f"rel_type : {self.rel_type}")
+        print(f"corpus : {self.corpus}")
+        print(f"adapters : {self.model_type_list}")
         print("=" * 80)
 
         # Load dataset
@@ -174,13 +174,13 @@ class RSTTreeParser:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RST Tree parsing cho video captions")
 
-    parser.add_argument("--base_model_name",          type=str, default="meta-llama/Llama-2-7b-hf")
+    parser.add_argument("--base_model_name", type=str, default="meta-llama/Llama-2-7b-hf")
     parser.add_argument("--model_size", type=str, default="7b", choices=["7b", "13b", "70b"])
-    parser.add_argument("--parse_type",    type=str, default="bottom_up",   choices=["bottom_up", "top_down"])
-    parser.add_argument("--rel_type",      type=str, default="rel_with_nuc", choices=["rel", "nuc_rel", "rel_with_nuc"])
-    parser.add_argument("--corpus",        type=str, default="rstdt",        choices=["rstdt", "instrdt", "gum"])
+    parser.add_argument("--parse_type", type=str, default="bottom_up", choices=["bottom_up", "top_down"])
+    parser.add_argument("--rel_type", type=str, default="rel_with_nuc", choices=["rel", "nuc_rel", "rel_with_nuc"])
+    parser.add_argument("--corpus", type=str, default="rstdt", choices=["rstdt", "instrdt", "gum"])
 
-    parser.add_argument("--dataset_file",    type=str, required=True,
+    parser.add_argument("--dataset_file", type=str, required=True,
                         help="Path tới file JSON: list[{doc_id, edu_strings, video_dir?}]")
 
     args = parser.parse_args()

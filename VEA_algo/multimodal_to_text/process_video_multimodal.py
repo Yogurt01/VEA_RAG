@@ -50,23 +50,57 @@ For mood, color_temperature, color_saturation, color_lightness, lighting, backgr
 pick EXACTLY ONE value from the options listed.
 """
 
-COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions for short video clips.
+# COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions for short video clips.
+# You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
+
+# Rules for writing captions:
+# - Write a "caption" for each scene: 1-2 sentences, specific and concrete.
+# - Focus on what is DIFFERENT or NEW in each scene compared to others (new speaker, change in action, emotional shift, new visual element).
+# - Do NOT repeat shared background details in every caption — mention setting only once in the first scene or when it changes.
+# - If OCR text is clearly a subtitle copy of the transcript, ignore it. Only use OCR if it adds new info (signs, overlays, lower-thirds).
+
+# Speaker diarization note:
+# - Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are generated automatically and may be incorrect.
+# - If the transcript speaker label seems inconsistent with the visual description (e.g., the transcript says SPEAKER_00 but the visual shows a different person speaking), use visual context and conversational logic to infer who is actually speaking.
+# - Do not blindly trust speaker labels — cross-reference with who is visible, mouth movements, turn-taking patterns, and topic continuity across scenes.
+# - If speaker identity cannot be confidently inferred, use neutral phrasing (e.g., "one of the speakers", "the person on the left").
+
+# Output format:
+# - Output ONLY a JSON array, one object per scene, in order:
+# [{"scene_id": 0, "caption": "..."}, ...]
+# """
+
+COHERENT_SCENE_SYSTEM_PROMPT = """You are a narrative analyst writing scene-level captions for short video clips.
 You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
+Your goal is to write captions that will later be used to construct a discourse graph — so each caption must clearly encode the scene's narrative function, not just describe what happens visually.
 
-Rules for writing captions:
-- Write a "caption" for each scene: 1-2 sentences, specific and concrete.
-- Focus on what is DIFFERENT or NEW in each scene compared to others (new speaker, change in action, emotional shift, new visual element).
-- Do NOT repeat shared background details in every caption — mention setting only once in the first scene or when it changes.
-- If OCR text is clearly a subtitle copy of the transcript, ignore it. Only use OCR if it adds new info (signs, overlays, lower-thirds).
+## Caption writing rules
 
-Speaker diarization note:
-- Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are generated automatically and may be incorrect.
-- If the transcript speaker label seems inconsistent with the visual description (e.g., the transcript says SPEAKER_00 but the visual shows a different person speaking), use visual context and conversational logic to infer who is actually speaking.
-- Do not blindly trust speaker labels — cross-reference with who is visible, mouth movements, turn-taking patterns, and topic continuity across scenes.
-- If speaker identity cannot be confidently inferred, use neutral phrasing (e.g., "one of the speakers", "the person on the left").
+Content:
+- Write exactly 1-2 sentences per scene, specific and concrete.
+- Each caption must answer: WHAT happens, WHO is involved, and WHY it matters in the flow of the video.
+- Make the causal, temporal, or logical relationship to adjacent scenes explicit when possible.
+  - Instead of: "A man speaks to a woman."
+  - Write: "A man reveals he is making chocolate, triggering the woman's surprise and curiosity."
+- Capture turning points, emotional shifts, reactions, and consequences — not just static descriptions.
+- If a scene is a reaction to the previous one, say so explicitly: "In response to...", "Following...", "As a result..."
+- If a scene provides background or context, frame it as such: "Establishing the setting...", "To explain his background..."
+- If a scene is a close-up insert or cutaway with no dialogue, describe what it emphasizes or what information it adds to the narrative.
+- If a scene is silent and transitional, describe its function: does it build tension, provide a pause, show a reaction?
 
-Output format:
-- Output ONLY a JSON array, one object per scene, in order:
+What NOT to do:
+- Do NOT repeat shared background details (e.g., "in a dimly lit room") in every caption — mention setting only once or when it changes.
+- Do NOT write generic captions like "two people are talking" or "the scene continues."
+- Do NOT summarize the whole video in every caption — each caption covers only its own scene.
+
+## Speaker diarization note
+- Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are auto-generated and may be incorrect.
+- Cross-reference speaker labels with visual descriptions, turn-taking logic, and topic continuity across scenes.
+- If inconsistency is detected between the speaker label and the visual (e.g., label says SPEAKER_00 but visual shows a different person speaking), infer the correct speaker from context.
+- If speaker identity cannot be determined, use neutral phrasing: "one of the speakers", "the person on screen".
+
+## Output format
+Output ONLY a JSON array, one object per scene, in order:
 [{"scene_id": 0, "caption": "..."}, ...]
 """
 
@@ -100,6 +134,7 @@ class Prompter:
         # File names
         self.segmentation_filename = 'segments.json'
         self.clips_directory = 'clips'
+        self.embedding_filename = 'scene_embeddings.pt'
 
         # Control flags for processing steps
         self.skip_segment = args.skip_segment
@@ -107,6 +142,7 @@ class Prompter:
         self.skip_visual_caption = args.skip_visual_caption
         self.skip_scene_caption = args.skip_scene_caption
         self.skip_audio = args.skip_audio
+        self.skip_scene_embedding = args.skip_scene_embedding
         
         # Get all video directory paths, optionally limited
         all_video_dirs = sorted([d for d in self.root_dir.iterdir() if d.is_dir()])
@@ -275,7 +311,10 @@ class Prompter:
             overwrite=True
         )
         # Load Qwen3-VL model
-        model = foz.load_zoo_model("Qwen/Qwen3-VL-2B-Instruct")
+        model = foz.load_zoo_model("Qwen/Qwen3-VL-4B-Instruct",
+                                   total_pixels=5*1024*32*32,
+                                   fps=0.5,
+                                   max_frames=32)
         model.operation = "custom"
 
         for video_dir, video_path in zip(self.video_dirs, self.videos):
@@ -307,7 +346,7 @@ class Prompter:
                 speakers = scene.get("speaker", [])
                 transcript = [
                     {"speaker": sp, "text": t}
-                    for sp, t in zip(speakers, texts)
+                    for sp, t in zip(speakers, texts) if sp.strip()
                 ]
 
                 s = fo.Sample(filepath=str(clip_path))
@@ -522,6 +561,123 @@ class Prompter:
         del model
         self._clean_memory()
 
+    ## --------------------
+    ## 6. Generate Scene Embedding
+    ## --------------------
+    def _generate_scene_embeddings(self, force_recompute=False):
+        from qwen3_vl_embedding import Qwen3VLEmbedder
+
+        # Initialize the embedding model with bfloat16 for inference efficiency
+        embedder = Qwen3VLEmbedder(
+            model_name_or_path="Qwen/Qwen3-VL-Embedding-2B",
+            torch_dtype=torch.bfloat16
+        )
+
+        for video_dir in self.video_dirs:
+            segment_file = video_dir / self.segmentation_filename
+            if not segment_file.exists():
+                continue
+
+            with open(segment_file, 'r', encoding='utf-8') as f:
+                segments = json.load(f)
+
+            embedding_file = video_dir / self.embedding_filename
+
+            if embedding_file.exists() and not force_recompute:
+                print(f"Skipping {video_dir.name}: Embeddings already exist.")
+                continue
+
+            scene_embeddings = {}
+
+            for i, scene in enumerate(segments):
+                clip_path = scene.get("clip_path")
+                if not clip_path or not Path(clip_path).exists():
+                    print(f"Scene {i} missing clip, skip")
+                    continue
+
+                # Construct the multimodal prompt incorporating all extracted metadata
+                text_prompt = self._build_unified_embedding_text(scene)
+
+                inputs = [{
+                    "text": text_prompt,
+                    "video": clip_path
+                }]
+
+                # Generate the 2048-dimensional embedding
+                emb = embedder.process(inputs)
+
+                # Move to CPU and cast to float32 for downstream GNN compatibility
+                scene_embeddings[i] = emb[0].cpu().to(torch.float32) 
+
+            if not scene_embeddings:
+                continue
+
+            # Sort by scene index to ensure temporal and structural alignment
+            sorted_indices = sorted(scene_embeddings.keys())
+            scene_embeddings = torch.stack([scene_embeddings[i] for i in sorted_indices])
+
+            # Save the feature matrix along with metadata for reproducibility
+            torch.save({
+                "embeddings": scene_embeddings,
+                "scene_ids": sorted_indices,
+                "metadata": {
+                    "model": "Qwen3-VL-Embedding-2B",
+                    "embed_dim": 2048,
+                    "created_at": time.ctime(),
+                }
+            }, embedding_file)
+
+        del embedder
+        self._clean_memory()
+
+    def _build_unified_embedding_text(self, scene: dict) -> str:
+        # Format the spoken transcript with speaker labels
+        transcript_lines = []
+        for spk, txt in zip(scene.get("speaker", []), scene.get("text", [])):
+            if txt and str(txt).strip():  # bỏ dòng rỗng
+                transcript_lines.append(f"{spk}: {txt.strip()}")
+        
+        transcript = "\n".join(transcript_lines) if transcript_lines else "(no spoken dialogue)"
+
+        # Process on-screen text (OCR)
+        ocr_list = scene.get("ocr_text", [])
+        ocr_text = "\n".join([t.strip() for t in ocr_list if t and str(t).strip()]) if ocr_list else "(no on-screen text)"
+
+        # Extract primary and secondary physical activities
+        vis = scene.get("visual_elements", {})
+        activities = vis.get("activities", {}) if isinstance(vis, dict) else {}
+
+        visual_summary = f"""Primary activity: {activities.get("primary_activity", "unknown")}
+    Secondary activities: {activities.get("secondary_activities", "none")}"""
+
+        # Final prompt construction utilizing Task-Specific Instruction
+        text_for_embedding = f"""Represent this video scene as a node in a multimodal discourse graph:
+
+Spoken transcript:
+{transcript}
+
+Scene caption:
+{scene.get("caption", "(no caption)")}
+
+Visual elements:
+{visual_summary}
+Mood: {vis.get("mood", "neutral")}
+Lighting: {vis.get("lighting", "unknown")}
+Background: {vis.get("background", "unknown")}
+Color temperature: {vis.get("color_temperature", "unknown")}
+Color saturation: {vis.get("color_saturation", "medium")}
+Color lightness: {vis.get("color_lightness", "medium")}
+
+Audio atmosphere:
+Tags: {", ".join(scene.get("audio_tags", [])) or "none"}
+Vibes: {", ".join(scene.get("audio_vibes", [])) or "none"}
+
+On-screen text:
+{ocr_text}"""
+
+        return text_for_embedding.strip()
+
+
     def run(self):
         """
         Executes the entire processing pipeline.
@@ -549,6 +705,10 @@ class Prompter:
             if not self.skip_audio:
                 print("\n--- Step 5: Audio Tagging ---")
                 self._audio_tagging()
+
+            if not self.skip_scene_embedding:
+                print("\n--- Step 6: Generate Scene Embedding ---")
+                self._generate_scene_embeddings()
 
             print(f"\nAll processing steps completed in {time.time() - start_time:.2f} seconds.")
 
@@ -578,6 +738,7 @@ if __name__ == '__main__':
     parser.add_argument('--skip_visual_caption', action='store_true', help="Skip visual caption generation.")
     parser.add_argument('--skip_scene_caption', action='store_true', help="Skip scene caption generation.")
     parser.add_argument('--skip_audio', action='store_true', help="Skip audio tagging.")
+    parser.add_argument('--skip_scene_embedding', action='store_true', help="Skip scene embedding generation.")
 
     args = parser.parse_args()
 

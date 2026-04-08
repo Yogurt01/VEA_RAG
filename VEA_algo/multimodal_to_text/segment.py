@@ -20,11 +20,17 @@ def scene_detection(video, detector):
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video}")
 
+        video_stream = open_video(str(video_path))
+        fps = video_stream.frame_rate
+        min_scene_len = max(int(fps * 3), 45)
+
         try:
             video_stream = open_video(str(video_path))
             stats_manager = StatsManager()
             scene_manager = SceneManager(stats_manager)
-            scene_manager.add_detector(ContentDetector())
+            scene_manager.add_detector(ContentDetector(threshold=27.0,
+                                                       min_scene_len=min_scene_len,
+                                                       luma_only=False))
             scene_manager.detect_scenes(video=video_stream)
             scene_list = scene_manager.get_scene_list()
 
@@ -32,7 +38,11 @@ def scene_detection(video, detector):
                 video_stream = open_video(str(video_path))
                 stats_manager = StatsManager()
                 scene_manager = SceneManager(stats_manager)
-                scene_manager.add_detector(AdaptiveDetector())
+                scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=3.0,     
+                                                            min_scene_len=min_scene_len,           
+                                                            window_width=2,             
+                                                            min_content_val=15.0,       
+                                                            luma_only=False))
                 scene_manager.detect_scenes(video=video_stream)
                 scene_list = scene_manager.get_scene_list()
 
