@@ -13,15 +13,19 @@ import subprocess
 
 import cv2
 import torch
-from scenedetect import AdaptiveDetector
+
 import fiftyone as fo
 import fiftyone.zoo as foz
+
+from pydantic import BaseModel
+from typing import List
 from openai import OpenAI
 
+from scenedetect import AdaptiveDetector
 from segment import scene_detection, segment_with_stt_timestamp
 
 # load_dotenv()
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 QWEN_PROMPT_TEMPLATE =  """You have the following transcript for this video scene:
 {transcript}
@@ -49,26 +53,6 @@ Respond ONLY with a valid JSON object, no markdown, no explanation.
 For mood, color_temperature, color_saturation, color_lightness, lighting, background:
 pick EXACTLY ONE value from the options listed.
 """
-
-# COHERENT_SCENE_SYSTEM_PROMPT = """You are a video analyst writing scene-level captions for short video clips.
-# You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
-
-# Rules for writing captions:
-# - Write a "caption" for each scene: 1-2 sentences, specific and concrete.
-# - Focus on what is DIFFERENT or NEW in each scene compared to others (new speaker, change in action, emotional shift, new visual element).
-# - Do NOT repeat shared background details in every caption — mention setting only once in the first scene or when it changes.
-# - If OCR text is clearly a subtitle copy of the transcript, ignore it. Only use OCR if it adds new info (signs, overlays, lower-thirds).
-
-# Speaker diarization note:
-# - Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are generated automatically and may be incorrect.
-# - If the transcript speaker label seems inconsistent with the visual description (e.g., the transcript says SPEAKER_00 but the visual shows a different person speaking), use visual context and conversational logic to infer who is actually speaking.
-# - Do not blindly trust speaker labels — cross-reference with who is visible, mouth movements, turn-taking patterns, and topic continuity across scenes.
-# - If speaker identity cannot be confidently inferred, use neutral phrasing (e.g., "one of the speakers", "the person on the left").
-
-# Output format:
-# - Output ONLY a JSON array, one object per scene, in order:
-# [{"scene_id": 0, "caption": "..."}, ...]
-# """
 
 COHERENT_SCENE_SYSTEM_PROMPT = """You are a narrative analyst writing scene-level captions for short video clips.
 You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
@@ -100,9 +84,18 @@ What NOT to do:
 - If speaker identity cannot be determined, use neutral phrasing: "one of the speakers", "the person on screen".
 
 ## Output format
-Output ONLY a JSON array, one object per scene, in order:
-[{"scene_id": 0, "caption": "..."}, ...]
+Return a JSON object with a single key "scenes" containing an array of scene objects.
+Example:
+{"scenes": [{"scene_id": 0, "caption": "..."}, ...]}
 """
+
+class SceneCaption(BaseModel):
+    scene_id: int
+    caption: str
+
+class VideoCaptions(BaseModel):
+    scenes: List[SceneCaption]
+
 
 def normalize_path(path):
     """
@@ -155,7 +148,10 @@ class Prompter:
             if mp4_files:
                 self.videos.append(mp4_files[0])
 
-        self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        self.openai_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY
+        )
 
         self.base_dir = Path(__file__).resolve().parent
         self.beat_checkpoint_path = self.base_dir / "beats_checkpoints" / "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
@@ -442,7 +438,7 @@ class Prompter:
                 scenes_payload.append({
                     "scene_id": i,
                     "start": seg["start"][0] if isinstance(seg["start"], list) else seg["start"],
-                    "end": seg["end"][-1]  if isinstance(seg["end"],   list) else seg["end"],
+                    "end": seg["end"][-1] if isinstance(seg["end"], list) else seg["end"],
                     "transcript": " / ".join(transcript_lines) or "(no speech)",
                     "visual_description": seg.get("visual_description", ""),
                     "ocr_text": seg.get("ocr_text", []),
@@ -453,44 +449,33 @@ class Prompter:
                 "Write captions that highlight what changes between scenes, not what stays the same."
             )
 
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            response = self.openai_client.chat.completions.parse(
+                model="openai/gpt-oss-120b:free",
                 messages=[
                     {"role": "system", "content": COHERENT_SCENE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=4096,
-                temperature=0.2,
+                extra_body={"reasoning": {"enabled": True}},
+                response_format=VideoCaptions
             )
 
-            raw = response.choices[0].message.content
-            caption_map = self._parse_caption_response(raw)
+            parsed_data = response.choices[0].message.parsed
+
+            if parsed_data is None:
+                print("The AI does not return the required JSON format correctly.")
+                print("Raw content from AI:", response.choices[0].message.content)
+                return
+            
+            caption_map = {item.scene_id: item.caption for item in parsed_data.scenes}
 
             for i, seg in enumerate(segments):
-                cap = caption_map.get(i)
-                if cap:
-                    seg["caption"] = cap
+                if i in caption_map:
+                    seg["caption"] = caption_map[i]
+                else:
+                    print(f"Warning: Scene {i} missing from AI response")
 
             with open(segment_file, 'w', encoding='utf-8') as f:
                 json.dump(segments, f, indent=2, ensure_ascii=False)
-
-    def _parse_caption_response(self, raw: str) -> dict:
-        """Parse JSON array from LLM response, return {scene_id: caption}."""
-        text = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
-        try:
-            arr = json.loads(text)
-        except json.JSONDecodeError:
-            m = re.search(r'\[.*\]', text, re.DOTALL)
-            if not m:
-                print(f"Failed to parse caption response: {text[:80]}")
-                return {}
-            try:
-                arr = json.loads(m.group())
-            except json.JSONDecodeError:
-                print(f"Failed to parse caption response: {text[:80]}")
-                return {}
-
-        return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
 
     ## --------------------
     ## 5. Audio Tagging
