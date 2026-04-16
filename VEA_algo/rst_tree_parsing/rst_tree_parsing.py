@@ -104,26 +104,6 @@ class RSTTreeParser:
         peft_model.eval()
         return peft_model, tokenizer
 
-    # def _save_trees(self, output, save_dir, doc_id_to_video_dir):
-    #     pred_dir = os.path.join(save_dir, "pred")
-    #     os.makedirs(pred_dir, exist_ok=True)
-
-    #     for doc_id, tree in zip(output["doc_id"], output["pred_tree"]):
-    #         assert isinstance(tree, AttachTree)
-
-    #         # Lưu vào save_path/pred/
-    #         with open(os.path.join(pred_dir, f"{doc_id}.tree"), "w") as f:
-    #             print(tree, file=f)
-
-    #         # Lưu về folder video gốc nếu có
-    #         if doc_id in doc_id_to_video_dir:
-    #             video_dir = Path(doc_id_to_video_dir[doc_id])
-    #             with open(video_dir / "rst_tree.tree", "w") as f:
-    #                 print(tree, file=f)
-    #             print(f"✅ {doc_id} → {pred_dir}/ + {video_dir}/rst_tree.tree")
-    #         else:
-    #             print(f"✅ {doc_id} → {pred_dir}/")
-
     def _save_trees(self, output, doc_id_to_video_dir):
         for doc_id, tree in zip(output["doc_id"], output["pred_tree"]):
             assert isinstance(tree, AttachTree)
@@ -181,7 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--corpus", type=str, default="rstdt", choices=["rstdt", "instrdt", "gum"])
 
     parser.add_argument("--dataset_file", type=str, required=True,
-                        help="Path tới file JSON: list[{doc_id, edu_strings, video_dir?}]")
+                        help="Path to file JSON: list[{doc_id, edu_strings, video_dir?}]")
 
     args = parser.parse_args()
 

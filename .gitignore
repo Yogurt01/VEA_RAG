@@ -13,3 +13,7 @@ venv/
 *.mkv
 models/
 output/
+
+*_checkpoints/
+RSTParser_EACL24/
+DPLP/
