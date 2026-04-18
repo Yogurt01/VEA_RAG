@@ -18,7 +18,7 @@ import fiftyone as fo
 import fiftyone.zoo as foz
 
 from pydantic import BaseModel
-from typing import List
+from typing import Optional, Dict, List
 
 from scenedetect import AdaptiveDetector
 from segment import scene_detection, segment_with_stt_timestamp
@@ -30,17 +30,10 @@ QWEN_PROMPT_TEMPLATE =  """You have the following transcript for this video scen
 {transcript}
 
 Using the transcript above only as a hint for who is speaking, analyze this video clip.
-Respond ONLY with a valid JSON object, no markdown, no explanation.
+Respond ONLY with a valid JSON object, no markdown, no explanation, no extra text.
 
 {{
-    "visual_description": "Describe only what you SEE: setting, people present, their "
-                            "appearance (clothing, expressions, posture), physical actions, "
-                            "camera angle/framing. Do NOT interpret meaning or infer narrative.",
-    "activities": {{
-        "primary_activity": "main physical action observable",
-        "secondary_activities": "other actions visible, comma-separated"
-    }},
-    "ocr": "Text PHYSICALLY VISIBLE on screen (subtitles, signs, banners, lower-thirds, overlays). Do NOT copy from the transcript above. If no text is visually present on screen, return an empty list []. If text is present, return the results as a list of strings (e.g., ['text1', 'text2']).",
+    "visual_description": "Describe only what you SEE: setting, people present, their appearance (clothing, expressions, posture), physical actions, camera angle/framing, AND any text PHYSICALLY VISIBLE on screen (signs, banners, lower-thirds, overlays). Include any visible text directly inside this description. Do NOT interpret meaning or infer narrative.",
     "mood": "calm|energetic|dramatic|neutral",
     "color_temperature": "warm|cool|achromatic",
     "color_saturation": "high|medium|low",
@@ -54,27 +47,35 @@ pick EXACTLY ONE value from the options listed.
 """
 
 COHERENT_SCENE_SYSTEM_PROMPT = """You are a narrative analyst writing scene-level captions for short video clips.
-You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels, a visual description, and OCR text.
-Your goal is to write captions that will later be used to construct a discourse graph — so each caption must clearly encode the scene's narrative function, not just describe what happens visually.
+You will receive a list of scenes from a single video. Each scene includes a transcript with speaker labels and a visual description.
+Your goal is to write captions that will later be used to construct a discourse graph — specifically an RST (Rhetorical Structure Theory) Tree. Therefore, each caption must clearly encode the scene's rhetorical/narrative function so that an RST parser can produce a rich, hierarchical tree with diverse relation types (not just Sequence or simple Cause).
+
+## RST Alignment & Diversity Goals (CRITICAL)
+- Treat each caption as an Elementary Discourse Unit (EDU).
+- Vary relation types across scenes to create a deep, non-flat RST tree: use Elaboration, Background, Circumstance, Cause/Result (volitional & non-volitional), Purpose, Means, Condition, Contrast, Antithesis, Concession, Motivation, Evidence, Evaluation, Sequence, Conjunction.
+- Prefer nuclearity: make the core action/event the **nucleus** (main clause), supporting info the **satellite** (subordinate clause or adverbial).
+- Use explicit discourse markers to cue relations:
+  - Cause/Result: "causing...", "as a result...", "leading to...", "triggering..."
+  - Purpose/Means: "to achieve...", "in order to...", "by..."
+  - Contrast/Antithesis/Concession: "however...", "despite...", "although...", "in contrast to the previous..."
+  - Background/Circumstance: "To set the context...", "Against the backdrop of..."
+  - Elaboration: "specifically...", "for example...", "adding that..."
+  - Motivation/Evidence: "motivating...", "providing evidence that...", "revealing why..."
+- Make causal, temporal, logical, or rhetorical relationship to adjacent scenes explicit whenever possible.
 
 ## Caption writing rules
-
-Content:
 - Write exactly 1-2 sentences per scene, specific and concrete.
-- Each caption must answer: WHAT happens, WHO is involved, and WHY it matters in the flow of the video.
-- Make the causal, temporal, or logical relationship to adjacent scenes explicit when possible.
-  - Instead of: "A man speaks to a woman."
-  - Write: "A man reveals he is making chocolate, triggering the woman's surprise and curiosity."
+- Each caption must answer: WHAT happens, WHO is involved, and WHY it matters rhetorically in the flow of the video (nucleus + satellite).
 - Capture turning points, emotional shifts, reactions, and consequences — not just static descriptions.
-- If a scene is a reaction to the previous one, say so explicitly: "In response to...", "Following...", "As a result..."
-- If a scene provides background or context, frame it as such: "Establishing the setting...", "To explain his background..."
-- If a scene is a close-up insert or cutaway with no dialogue, describe what it emphasizes or what information it adds to the narrative.
-- If a scene is silent and transitional, describe its function: does it build tension, provide a pause, show a reaction?
+- If a scene is a reaction/response to the previous: start with "In response to...", "Following...", "As a result of the previous scene...".
+- If a scene provides background or context: frame it as "To provide background...", "Establishing the context for...".
+- If a scene is a close-up/insert/silent transition: describe its rhetorical function (e.g., "Emphasizing the emotional impact of the previous revelation...").
 
 What NOT to do:
-- Do NOT repeat shared background details (e.g., "in a dimly lit room") in every caption — mention setting only once or when it changes.
+- Do NOT repeat shared background details in every caption.
 - Do NOT write generic captions like "two people are talking" or "the scene continues."
-- Do NOT summarize the whole video in every caption — each caption covers only its own scene.
+- Do NOT overuse temporal markers only ("then...", "next...") — this creates flat Sequence-only trees.
+- Do NOT summarize the whole video — each caption covers only its own scene.
 
 ## Speaker diarization note
 - Speaker labels (SPEAKER_00, SPEAKER_01, etc.) are auto-generated and may be incorrect.
@@ -82,10 +83,13 @@ What NOT to do:
 - If inconsistency is detected between the speaker label and the visual (e.g., label says SPEAKER_00 but visual shows a different person speaking), infer the correct speaker from context.
 - If speaker identity cannot be determined, use neutral phrasing: "one of the speakers", "the person on screen".
 
-## Output format
-Your response must be ONLY a valid JSON array in this exact format:
-[{"scene_id": 0, "caption": "..."}, {"scene_id": 1, "caption": "..."}, ...]
-Do not include any explanation, reasoning, or text outside the JSON array.
+## CRITICAL: Output format
+- Your response MUST be ONLY a valid JSON array, starting with [ and ending with ].
+- Do NOT include any text before or after the JSON array.
+- Do NOT use markdown code blocks (no ```json ... ```).
+- Each object must have exactly two keys: "scene_id" (integer) and "caption" (string).
+- Example of correct output:
+[{"scene_id": 0, "caption": "First caption here."}, {"scene_id": 1, "caption": "Second caption here."}]
 """
 
 class SceneCaption(BaseModel):
@@ -197,7 +201,6 @@ class Prompter:
                     for seg in segments:
                         if 'text' in seg:
                             seg['text'] = [normalize_vietnamese_text(t) for t in seg['text']] if isinstance(seg['text'], list) else normalize_vietnamese_text(seg['text'])
-                        seg.setdefault('ocr_text', [])
                 else:
                     # Create a default segment covering the whole video
                     self._create_default_segment(video_path, segment_file)
@@ -253,10 +256,12 @@ class Prompter:
                 clip_start = start_list[0] if isinstance(start_list, list) else start_list
                 clip_end = end_list[-1] if isinstance(end_list, list) else end_list
 
+                actual_end = min(clip_start + 5.0, clip_end)
+
                 clip_name = f"clip_{i:03d}_{clip_start:.2f}-{clip_end:.2f}.mp4"
                 clip_path = clips_dir / clip_name
 
-                ok = self._cut_clip(video_path, clip_start, clip_end, clip_path)
+                ok = self._cut_clip(video_path, clip_start, actual_end, clip_path)
                 if ok:
                     seg["clip_path"] = str(clip_path)
 
@@ -271,23 +276,24 @@ class Prompter:
         if duration <= 0:
             return False
 
-        result = subprocess.run(
-            [
-                "ffmpeg",
-                "-ss",  str(start),
-                "-i",   str(src),
-                "-t",   str(duration),
-                "-c",   "copy",
-                "-avoid_negative_ts", "1",
-                str(dst),
-                "-y",
-                "-loglevel", "error"
-            ],
-            capture_output=True,
-            text=True
-        )
+        command = [
+            "ffmpeg",
+            "-ss", str(start),     
+            "-t", str(duration),   
+            "-i", str(src),
+            "-c:v", "libx264",     
+            "-crf", "18",          
+            "-preset", "ultrafast",
+            "-c:a", "aac",         
+            "-y",
+            "-loglevel", "error",
+            str(dst)
+        ]
+
+        result = subprocess.run(command, capture_output=True, text=True)
 
         if result.returncode != 0:
+            print(f"Error cutting clip: {result.stderr}")
             return False
         return True
 
@@ -302,7 +308,7 @@ class Prompter:
         )
         # Load Qwen3-VL model
         model = foz.load_zoo_model(
-            "Qwen/Qwen3-VL-4B-Instruct",
+            "Qwen/Qwen3-VL-2B-Instruct",
             total_pixels=1*1024*32*32,
             max_frames=32,
             sample_fps=0.5
@@ -372,10 +378,8 @@ class Prompter:
                 if "_raw" in result:
                     continue
 
-                segments[idx]["ocr_text"] = result.get("ocr", "")
                 segments[idx]["visual_description"] = result.get("visual_description", "")
                 segments[idx]["visual_elements"] = {
-                    "activities": result.get("activities", {}),
                     "mood": result.get("mood", ""),
                     "color_temperature": result.get("color_temperature", ""),
                     "color_saturation": result.get("color_saturation", ""),
@@ -402,121 +406,22 @@ class Prompter:
                     return json.loads(match.group())
                 except json.JSONDecodeError:
                     pass
-            print(f"False to parse, saving raw: {text[:80]}")
+            print(f"Failed to parse, saving raw: {text[:80]}")
             return {"_raw": text}
 
     
     ## --------------------
     ## 4. Generate Scene Caption
     ## --------------------
-    # def _generate_scene_captions(self):
-    #     from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    #     # load the tokenizer and the model
-    #     tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B-Thinking-2507")
-    #     model = AutoModelForCausalLM.from_pretrained(
-    #         "Qwen/Qwen3-4B-Thinking-2507",
-    #         torch_dtype="auto",
-    #         device_map="auto"
-    #     )
-
-    #     for video_dir, video_path in zip(self.video_dirs, self.videos):
-    #         segment_file = video_dir / self.segmentation_filename
-    #         if not segment_file.exists():
-    #             continue
-
-    #         with open(segment_file, 'r', encoding='utf-8') as f:
-    #             segments = json.load(f)
-
-    #         # Skip if all scenes already have captions
-    #         if all("caption" in seg for seg in segments):
-    #             print(f"Skipping scene caption for {video_dir.name}, already processed.")
-    #             continue
-
-    #         # Build payload with only the fields needed by the LLM
-    #         scenes_payload = []
-    #         for i, seg in enumerate(segments):
-    #             transcript_lines = [
-    #                 f"{sp}: {t}"
-    #                 for sp, t in zip(seg.get("speaker", []), seg.get("text", []))
-    #                 if t.strip()
-    #             ]
-    #             scenes_payload.append({
-    #                 "scene_id": i,
-    #                 "start": seg["start"][0] if isinstance(seg["start"], list) else seg["start"],
-    #                 "end": seg["end"][-1] if isinstance(seg["end"], list) else seg["end"],
-    #                 "transcript": " / ".join(transcript_lines) or "(no speech)",
-    #                 "visual_description": seg.get("visual_description", ""),
-    #                 "ocr_text": seg.get("ocr_text", []),
-    #             })
-
-    #         user_prompt = (
-    #             f"Scenes:\n{json.dumps(scenes_payload, ensure_ascii=False, indent=2)}\n\n"
-    #             "Write captions that highlight what changes between scenes, not what stays the same."
-    #         )
-
-    #         messages = [
-    #             {
-    #                 "role": "system",
-    #                 "content": COHERENT_SCENE_SYSTEM_PROMPT
-    #             },
-    #             {
-    #                 "role": "user",
-    #                 "content": user_prompt
-    #             }
-    #         ]
-
-    #         text = tokenizer.apply_chat_template(
-    #             messages,
-    #             tokenize=False,
-    #             add_generation_prompt=True,
-    #         )
-    #         model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    #         # conduct text completion
-    #         generated_ids = model.generate(
-    #             **model_inputs,
-    #             max_new_tokens=32768
-    #         )
-    #         output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
-
-    #         # Parsing thinking content
-    #         try:
-    #             # rindex finding 151668 (</think>)
-    #             index = len(output_ids) - output_ids[::-1].index(151668)
-    #         except ValueError:
-    #             index = 0
-
-    #         content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
-
-    #         # Parse JSON
-    #         json_match = re.search(r'\{.*\}', content, re.DOTALL)
-    #         json_str = json_match.group(0) if json_match else content
-
-    #         parsed_data = json.loads(json_str)
-    #         parsed_data_obj = VideoCaptions.model_validate(parsed_data)
-
-    #         # Map caption to segments
-    #         caption_map = {item.scene_id: item.caption for item in parsed_data_obj.scenes}
-    #         for i, seg in enumerate(segments):
-    #             if i in caption_map:
-    #                 seg["caption"] = caption_map[i]
-    #             else:
-    #                 print(f"Warning: Missing caption of scene {i}")
-
-    #         # Save file
-    #         with open(segment_file, 'w', encoding='utf-8') as f:
-    #             json.dump(segments, f, indent=2, ensure_ascii=False)
-        
-    #     del tokenizer, model
-    #     self._clean_memory()
-
     def _generate_scene_captions(self):
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from transformers.utils.import_utils import is_flash_attn_2_available
 
-        model_id = "Qwen/Qwen3-4B-Thinking-2507"
-        model_kwargs = {"dtype": "auto", "device_map": self.device}
+        model_id = "Qwen/Qwen3-4B-Instruct-2507"
+        model_kwargs = {
+            "torch_dtype": "auto",
+            "device_map": "auto"
+        }
         if self.device == "cuda" and is_flash_attn_2_available():
             model_kwargs["attn_implementation"] = "flash_attention_2"
             print("Using Flash Attention 2")
@@ -552,7 +457,6 @@ class Prompter:
                     "end":                seg["end"][-1]  if isinstance(seg["end"],   list) else seg["end"],
                     "transcript":         " / ".join(transcript_lines) or "(no speech)",
                     "visual_description": seg.get("visual_description", ""),
-                    "ocr_text":           seg.get("ocr_text", []),
                 })
 
             caption_map = self._generate_captions_batched(
@@ -573,10 +477,9 @@ class Prompter:
         self._clean_memory()
 
 
-    def _call_qwen_thinking(self, model, tokenizer, messages: list) -> str:
+    def _call_qwen(self, model, tokenizer, messages: list) -> str:
         """
-        Run inference on Qwen3-Thinking model.
-        Strips the <think>...</think> block and returns only the final response content.
+        Run inference on Qwen3-Instruct model using standard generation.
         """
         text = tokenizer.apply_chat_template(
             messages,
@@ -587,17 +490,13 @@ class Prompter:
 
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=4096
+            max_new_tokens=8192,
+            temperature=0.3,
+            do_sample=True,
         )
         output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
 
-        # Find </think> token (id=151668) and take content after it
-        try:
-            index = len(output_ids) - output_ids[::-1].index(151668)
-        except ValueError:
-            index = 0
-
-        content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+        content = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
         return content
 
     def _update_narrative_context(
@@ -645,45 +544,78 @@ class Prompter:
             }
         ]
 
-        return self._call_qwen_thinking(model, tokenizer, messages)
+        return self._call_qwen(model, tokenizer, messages)
 
-    def _parse_batch_captions(self, raw: str) -> dict:
+    def _parse_batch_captions(self, raw: str, scene_ids: List[int]) -> Dict[int, str]:
         """
-        Parse JSON array from Qwen3-Thinking response.
+        Parse JSON array from Qwen3-Instruct response with multiple fallback strategies.
+        scene_ids: list of expected scene IDs to validate completeness.
         Returns {scene_id: caption}.
         """
-        # Try to find JSON array first
-        text = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
+        def extract_json(text: str) -> Optional[str]:
+            # Strategy 1: Remove markdown code blocks
+            text = re.sub(r'```(?:json)?\s*|\s*```', '', text).strip()
+            
+            # Strategy 2: Find outermost JSON array [...]
+            match = re.search(r'(\[.*\])', text, re.DOTALL)
+            if match:
+                return match.group(1)
+            
+            # Strategy 3: Find JSON object with "scenes" or "captions" key
+            match = re.search(r'(\{.*\})', text, re.DOTALL)
+            if match:
+                return match.group(1)
+            
+            # Strategy 4: Try to find line-by-line JSON objects and wrap them
+            lines = text.split('\n')
+            candidates = [line.strip() for line in lines if line.strip().startswith('{')]
+            if candidates:
+                wrapped = '[' + ','.join(candidates) + ']'
+                return wrapped
+            
+            return None
 
-        try:
-            arr = json.loads(text)
-            if isinstance(arr, list):
-                return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
-        except json.JSONDecodeError:
-            pass
+        def validate_captions(parsed: Dict[int, str], expected_ids: List[int]) -> bool:
+            """Check if all expected scene IDs have captions."""
+            return all(sid in parsed for sid in expected_ids)
 
-        # Fallback: find array block
-        m = re.search(r'\[.*\]', text, re.DOTALL)
-        if m:
+        # Try parsing up to 3 times with increasing leniency
+        for attempt in range(3):
             try:
-                arr = json.loads(m.group())
-                return {item["scene_id"]: item["caption"] for item in arr if "caption" in item}
-            except json.JSONDecodeError:
-                pass
-
-        # Fallback: find object block (Qwen sometimes wraps in {"scenes": [...]})
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            try:
-                obj = json.loads(m.group())
-                scenes = obj.get("scenes", [])
-                if scenes:
-                    return {item["scene_id"]: item["caption"] for item in scenes if "caption" in item}
-            except json.JSONDecodeError:
-                pass
-
-        print(f"Failed to parse batch captions: {text[:120]}")
-        return {}
+                json_str = extract_json(raw)
+                if not json_str:
+                    raise ValueError("No JSON structure found")
+                
+                data = json.loads(json_str)
+                
+                # Handle different possible structures
+                if isinstance(data, list):
+                    result = {item["scene_id"]: item["caption"] for item in data if "scene_id" in item and "caption" in item}
+                elif isinstance(data, dict):
+                    scenes = data.get("scenes", data.get("captions", []))
+                    result = {item["scene_id"]: item["caption"] for item in scenes if "scene_id" in item and "caption" in item}
+                else:
+                    raise ValueError(f"Unexpected JSON type: {type(data)}")
+                
+                # Validate completeness
+                if validate_captions(result, scene_ids):
+                    return result
+                else:
+                    missing = set(scene_ids) - set(result.keys())
+                    print(f"Attempt {attempt+1}: Missing captions for scenes {missing}, retrying...")
+                    
+            except json.JSONDecodeError as e:
+                print(f"Attempt {attempt+1}: JSON decode error: {e}")
+            except Exception as e:
+                print(f"Attempt {attempt+1}: Parsing error: {e}")
+            
+            # Exponential backoff before retry (if we were to re-call the model)
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+        
+        # Final fallback: partial recovery — return whatever we could parse
+        print(f"Final fallback: returning partial results for {len([s for s in scene_ids if s in locals().get('result', {})])}/{len(scene_ids)} scenes")
+        return locals().get('result', {})
     
     def _generate_captions_batched(
         self,
@@ -691,23 +623,18 @@ class Prompter:
         tokenizer,
         scenes_payload: list,
         batch_size: int = 10,
+        max_retries: int = 2,
     ) -> dict:
-        """
-        Generate scene captions in batches.
-        Each batch receives a narrative summary of all previous batches as context,
-        so later scenes understand what happened earlier in the video.
-
-        Returns {scene_id: caption}.
-        """
-        caption_map    = {}
-        narrative_context = ""   # accumulates summary across batches
-        total          = len(scenes_payload)
-        n_batches      = (total + batch_size - 1) // batch_size
+        caption_map = {}
+        narrative_context = ""
+        total = len(scenes_payload)
+        n_batches = (total + batch_size - 1) // batch_size
 
         for batch_idx in range(n_batches):
             start_idx = batch_idx * batch_size
-            end_idx   = min(start_idx + batch_size, total)
-            batch     = scenes_payload[start_idx:end_idx]
+            end_idx = min(start_idx + batch_size, total)
+            batch = scenes_payload[start_idx:end_idx]
+            expected_scene_ids = [item["scene_id"] for item in batch]
 
             print(f"  Captioning scenes {start_idx}-{end_idx - 1} / {total - 1} "
                 f"(batch {batch_idx + 1}/{n_batches})")
@@ -725,21 +652,31 @@ class Prompter:
                 context_block
                 + f"Scenes to caption:\n{json.dumps(batch, ensure_ascii=False, indent=2)}\n\n"
                 "Write captions that highlight what changes between scenes, not what stays the same. "
-                "Use the narrative context above to maintain continuity with earlier scenes."
+                "Use the narrative context above to maintain continuity with earlier scenes.\n\n"
+                "IMPORTANT: Respond with ONLY a valid JSON array, no explanations, no markdown."
             )
 
-            messages = [
-                {"role": "system", "content": COHERENT_SCENE_SYSTEM_PROMPT},
-                {"role": "user",   "content": user_prompt},
-            ]
+            # Retry loop for model call + parsing
+            for retry in range(max_retries + 1):
+                messages = [
+                    {"role": "system", "content": COHERENT_SCENE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ]
 
-            raw = self._call_qwen_thinking(model, tokenizer, messages)
+                raw = self._call_qwen(model, tokenizer, messages)
+                batch_caption_map = self._parse_batch_captions(raw, expected_scene_ids)
 
-            # Parse JSON array from response
-            batch_caption_map = self._parse_batch_captions(raw)
+                if batch_caption_map and len(batch_caption_map) == len(expected_scene_ids):
+                    break
+                
+                print(f"Retry {retry+1}/{max_retries} for batch {batch_idx+1} due to parse failure")
+                # Optional: add a small delay or adjust temperature for retry
+                if retry < max_retries:
+                    time.sleep(3)
+
             caption_map.update(batch_caption_map)
 
-            # Build list of successfully captioned scenes for summarization
+            # Build list of successfully captioned scenes
             batch_captioned = [
                 {"scene_id": item["scene_id"], "caption": caption_map[item["scene_id"]]}
                 for item in batch
@@ -906,28 +843,8 @@ class Prompter:
         
         transcript = "\n".join(transcript_lines) if transcript_lines else "(no spoken dialogue)"
 
-        # Process on-screen text (OCR)
-        ocr_list = scene.get("ocr_text", [])
-        ocr_text = "\n".join([t.strip() for t in ocr_list if t and str(t).strip()]) if ocr_list else "(no on-screen text)"
-
         # Extract primary and secondary physical activities
         vis = scene.get("visual_elements", {})
-        activities = vis.get("activities", {}) if isinstance(vis, dict) else {}
-
-        if isinstance(activities, dict):
-            primary = activities.get("primary_activity", "unknown")
-            secondary = activities.get("secondary_activities", "none")
-            
-        elif isinstance(activities, list):
-            # Gộp các phần tử trong list thành một chuỗi cách nhau bởi dấu phẩy
-            primary = ", ".join(map(str, activities)) 
-            secondary = "none"
-
-        elif isinstance(activities, str):
-            primary = activities 
-            secondary = "none" 
-
-        visual_summary = f"""Primary activity: {primary}\nSecondary activities: {secondary}"""
 
         # Final prompt construction utilizing Task-Specific Instruction
         text_for_embedding = f"""Represent this video scene as a node in a multimodal discourse graph:
@@ -938,8 +855,6 @@ Spoken transcript:
 Scene caption:
 {scene.get("caption", "(no caption)")}
 
-Visual elements:
-{visual_summary}
 Mood: {vis.get("mood", "neutral")}
 Lighting: {vis.get("lighting", "unknown")}
 Background: {vis.get("background", "unknown")}
@@ -949,10 +864,7 @@ Color lightness: {vis.get("color_lightness", "medium")}
 
 Audio atmosphere:
 Tags: {", ".join(scene.get("audio_tags", [])) or "none"}
-Vibes: {", ".join(scene.get("audio_vibes", [])) or "none"}
-
-On-screen text:
-{ocr_text}"""
+Vibes: {", ".join(scene.get("audio_vibes", [])) or "none"}"""
 
         return text_for_embedding.strip()
 
