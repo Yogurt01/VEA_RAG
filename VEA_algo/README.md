@@ -169,6 +169,12 @@ python multimodal_to_text/extract_audio_transcribe_diarization.py --root_dir dat
 python multimodal_to_text/process_video_multimodal.py --root_dir dataset/
 
 # Part 2
+## Hướng 1: Sử dụng LLM để tạo graph với 9 rhetorical relations theo Video Discourse
+python building_graph/caption_to_graph.py \
+  --root_dir dataset/ \
+  --force
+
+## Hướng 2: Tạo RST Tree để convert thành Dependency Tree
 python rst_tree_parsing/prepare_edus.py \
     --root_dir dataset/ \
     --output_json dataset/edu_dataset.json

@@ -9,7 +9,6 @@ numpy>=2.1.0
 opentelemetry-api<1.39.0
 opentelemetry-sdk<1.39.0
 
-git+https://github.com/MahmoudAshraf97/demucs.git
 librosa
 scenedetect[opencv]
 fiftyone
@@ -19,3 +18,6 @@ qwen-vl-utils
 bitsandbytes
 evaluate
 datasets
+
+neo4j
+pymilvus
