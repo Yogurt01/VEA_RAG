@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import torch
 from datetime import datetime
 from pathlib import Path
@@ -12,13 +13,15 @@ sys.path.append(str(Path(__file__).parent / "RSTParser_EACL24" / "src"))
 from data.tree import AttachTree
 from parse.parse import parse_dataset
 
-
-HUGGING_FACE_TOKEN = os.environ.get('HUGGING_FACE_TOKEN')
+os.environ["HF_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/huggingface_cache"
+os.environ["TORCH_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/torch_cache"
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 
 class RSTTreeParser:
     def __init__(self, args):
         self.base_model_name = args.base_model_name
+        self.adapter_base_path = args.adapter_base_path
         self.model_size = args.model_size
         self.parse_type = args.parse_type
         self.rel_type = args.rel_type
@@ -59,9 +62,12 @@ class RSTTreeParser:
 
     def load_model(self):
         print(f"Loading base model: {self.base_model_name}")
-        tokenizer = AutoTokenizer.from_pretrained(self.base_model_name, token=HUGGING_FACE_TOKEN)
+        
+        model_path = self.base_model_name
+
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
         base_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name,
+            model_path,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 llm_int8_threshold=6.0,
@@ -72,34 +78,39 @@ class RSTTreeParser:
             ),
             torch_dtype=torch.bfloat16,
             device_map="auto",
-            token=HUGGING_FACE_TOKEN
+            local_files_only=True
         )
         self._smart_tokenizer_and_embedding_resize({"pad_token": "[PAD]"}, tokenizer, base_model)
 
-        # Build HF Hub IDs từ corpus + model_size
-        hf_prefix = f"arumaekawa/{self.corpus}-{self.model_size}"
-        adapter_hub_ids = {
-            "span": f"{hf_prefix}-span",
-            "top_down": f"{hf_prefix}-top_down",
-            "nuc": f"{hf_prefix}-nuc",
-            "rel": f"{hf_prefix}-rel",
-            "nuc_rel": f"{hf_prefix}-nuc_rel",
-            "rel_with_nuc": f"{hf_prefix}-rel_with_nuc",
-        }
-
-        print(f"Loading adapters from HF Hub: {self.model_type_list}")
+        adapter_base_path = self.adapter_base_path
+        
+        print(f"Loading adapters: {adapter_base_path}")
         peft_model = None
+        
         for model_type in self.model_type_list:
-            hub_id = adapter_hub_ids[model_type]
-            print(f" → {hub_id}")
+            local_adapter_path = os.path.join(
+                adapter_base_path, 
+                f"{self.corpus}-{self.model_size}-{model_type}"
+            )
+            
+            print(f" → Loading adapter [{model_type}] from: {local_adapter_path}")
+            
+            if not os.path.exists(local_adapter_path):
+                raise FileNotFoundError(f"Không tìm thấy adapter tại: {local_adapter_path}")
+
             if peft_model is None:
                 peft_model = PeftModel.from_pretrained(
-                    base_model, hub_id,
+                    base_model, 
+                    local_adapter_path,
                     adapter_name=model_type,
-                    token=HUGGING_FACE_TOKEN
+                    local_files_only=True
                 )
             else:
-                peft_model.load_adapter(hub_id, model_type, token=HUGGING_FACE_TOKEN)
+                peft_model.load_adapter(
+                    local_adapter_path, 
+                    model_type, 
+                    local_files_only=True
+                )
 
         peft_model.eval()
         return peft_model, tokenizer
@@ -117,6 +128,7 @@ class RSTTreeParser:
                 print(f"{doc_id}: no video_dir, pass")
 
     def run(self):
+        start_time = time.time()
         print("=" * 80)
         print(f"parse_type : {self.parse_type}")
         print(f"rel_type : {self.rel_type}")
@@ -150,21 +162,20 @@ class RSTTreeParser:
 
         # Save trees
         self._save_trees(output, doc_id_to_video_dir)
+        print(f"\nAll processing steps completed in {time.time() - start_time:.2f} seconds.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RST Tree parsing cho video captions")
 
-    parser.add_argument("--base_model_name", type=str, default="meta-llama/Llama-2-7b-hf")
+    parser.add_argument("--base_model_name", type=str, default="/content/drive/MyDrive/KhoaLuan/models/Llama-2-7b-hf")
+    parser.add_argument('--adapter_base_path', type=str, default='/content/drive/MyDrive/KhoaLuan/models/adapters')
     parser.add_argument("--model_size", type=str, default="7b", choices=["7b", "13b", "70b"])
     parser.add_argument("--parse_type", type=str, default="bottom_up", choices=["bottom_up", "top_down"])
     parser.add_argument("--rel_type", type=str, default="rel_with_nuc", choices=["rel", "nuc_rel", "rel_with_nuc"])
     parser.add_argument("--corpus", type=str, default="rstdt", choices=["rstdt", "instrdt", "gum"])
-
-    parser.add_argument("--dataset_file", type=str, required=True,
-                        help="Path to file JSON: list[{doc_id, edu_strings, video_dir?}]")
+    parser.add_argument("--dataset_file", type=str, default="/content/drive/MyDrive/KhoaLuan/EnTube/edu_dataset.json", required=True, help="Path to file JSON: list[{doc_id, edu_strings, video_dir?}]")
 
     args = parser.parse_args()
 
     rst_parser = RSTTreeParser(args)
     rst_parser.run()
-        

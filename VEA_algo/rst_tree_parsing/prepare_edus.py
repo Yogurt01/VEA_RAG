@@ -50,8 +50,8 @@ class CaptionExtractor:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Gom captions từ segments.json thành RST dataset")
-    parser.add_argument("--root_dir", type=str, help="Thư mục gốc chứa các folder video")
-    parser.add_argument("--output_json", type=str, help="Path file JSON output")
+    parser.add_argument("--root_dir", type=str, default="/content/drive/MyDrive/KhoaLuan/EnTube/Download_2min", help="Thư mục gốc chứa các folder video")
+    parser.add_argument("--output_json", type=str, default="/content/drive/MyDrive/KhoaLuan/EnTube/edu_dataset.json", help="Path file JSON output")
     parser.add_argument("--min_edus", type=int, default=2, help="Số EDU tối thiểu để include doc (mặc định: 2)")
     
     args = parser.parse_args()

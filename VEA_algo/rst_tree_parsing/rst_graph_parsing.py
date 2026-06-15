@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Build RST graph for each video folder from:
 1) segments.json (captions)
 2) rst_tree.tree (LLM-generated bottom-up tree)
@@ -13,7 +12,7 @@ Pipeline per video:
 - rst_links -> edge_index / edge_attr
 - write edge_index, edge_attr, rst_links, y into scene_embeddings.pt
 """
-
+import time
 import argparse
 import json
 import re
@@ -24,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 import torch
+import unicodedata
+from unidecode import unidecode
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -36,52 +37,13 @@ from DPLP.rstscr import new_read_bracket, read_discourse_merge
 
 
 EDGE_TYPES = [
-    "elaboration",
-    "span",
-    "list",
-    "same_unit",
-    "textualorganization",
-    "topic",
-    "ROOT",
-    "attribution",
-    "contrast",
-    "circumstance",
-    "purpose",
-    "temporal",
-    "explanation",
-    "means",
-    "reason",
-    "condition",
-    "concession",
-    "antithesis",
-    "example",
-    "sequence",
-    "manner",
-    "question",
-    "comparison",
-    "disjunction",
-    "result",
-    "summary",
-    "comment",
-    "definition",
-    "evidence",
-    "restatement",
-    "evaluation",
-    "consequence",
-    "hypothetical",
-    "rhetorical",
-    "interpretation",
-    "background",
-    "inverted",
-    "enablement",
-    "contingency",
-    "cause",
-    "statement",
-    "preference",
-    "analogy",
+    "elaboration", "attribution", "joint", "same-unit", "contrast",
+    "explanation", "background", "cause", "enablement", "evaluation",
+    "temporal", "condition", "comparison", "topic-change", "summary",
+    "manner-means", "textual-organization", "topic-comment"
 ]
 DEFAULT_ETYPE_MAP = {k: i for i, k in enumerate(EDGE_TYPES)}
-DEFAULT_UNKNOWN_REL = "span"
+DEFAULT_UNKNOWN_REL = "joint"
 
 
 @dataclass
@@ -216,18 +178,19 @@ def write_brackets_file(spans: List[Tuple[Tuple[int, int], str, str]], out_path:
 
 def normalize_caption_text(text: str) -> str:
     text = (text or "").strip()
-    # Put spaces around punctuation for whitespace tokenizer mode.
-    text = text.replace('—', ", ")
+    text = unidecode(text)
+    text = unicodedata.normalize('NFKC', text)
+    text = re.sub(r'[“”‘’—–£€¥₹¤±©®™]', '', text)
     text = re.sub(r'([,.;:!?()"\'/\\-])', r" \1 ", text)
     # Normalize spaces.
     text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return text.lower()
 
 
 class RSTCaptionGraphBuilder:
     def __init__(
         self,
-        videos_root: Path,
+        root_dir: Path,
         segmentation_filename: str = "segments.json",
         embedding_filename: str = "scene_embeddings.pt",
         rst_tree_filename: str = "rst_tree.tree",
@@ -235,7 +198,7 @@ class RSTCaptionGraphBuilder:
         force: bool = False,
         java_cmd: str = "java",
     ):
-        self.videos_root = Path(videos_root).resolve()
+        self.root_dir = Path(root_dir).resolve()
         self.segmentation_filename = segmentation_filename
         self.embedding_filename = embedding_filename
         self.rst_tree_filename = rst_tree_filename
@@ -265,7 +228,7 @@ class RSTCaptionGraphBuilder:
         return -1
 
     def _run_corenlp(self, work_dir: Path, text_file: Path) -> Path:
-        classpath = str(self.repo_root / "DPLP" /"*")
+        classpath = str(self.repo_root / "DPLP" / "*")
         cmd = [
             self.java_cmd,
             "-mx2g",
@@ -442,12 +405,13 @@ class RSTCaptionGraphBuilder:
         )
 
     def run(self) -> None:
+        start_time = time.time()
         for video_dir in self._video_dirs():
             try:
                 self._process_one_video(video_dir)
             except Exception as exc:
                 print(f"Error in {video_dir.name}: {exc}")
-
+        print(f"\nAll processing steps completed in {time.time() - start_time:.2f} seconds.")
 
 def load_label_map(path: Path | None) -> Dict[str, int]:
     if path is None:
@@ -475,19 +439,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build RST graph from segments.json + rst_tree.tree and save to scene_embeddings.pt"
     )
-    parser.add_argument("--videos-root", required=True)
-    parser.add_argument("--segmentation-filename", default="segments.json")
-    parser.add_argument("--embedding-filename", default="scene_embeddings.pt")
-    parser.add_argument("--rst-tree-filename", default="rst_tree.tree")
-    parser.add_argument("--label-map-json")
+    parser.add_argument("--root_dir", type=str, required=True, default="/content/drive/MyDrive/KhoaLuan/EnTube/Download_2min", help="Thư mục gốc chứa các folder video")
+    parser.add_argument("--segmentation_filename", default="segments.json")
+    parser.add_argument("--embedding_filename", default="scene_embeddings.pt")
+    parser.add_argument("--rst_tree_filename", default="rst_tree.tree")
+    parser.add_argument("--label_map_json", default="/content/drive/MyDrive/KhoaLuan/EnTube/video_ids_label.json")
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--java-cmd", default="java")
+    parser.add_argument("--java_cmd", default="java")
     args = parser.parse_args()
 
     label_map = load_label_map(Path(args.label_map_json).resolve()) if args.label_map_json else {}
 
     runner = RSTCaptionGraphBuilder(
-        videos_root=Path(args.videos_root),
+        root_dir=Path(args.root_dir),
         segmentation_filename=args.segmentation_filename,
         embedding_filename=args.embedding_filename,
         rst_tree_filename=args.rst_tree_filename,
