@@ -37,40 +37,78 @@ from subgraphx.task_enum import Task
 # ========================
 # Hàm tính fidelity và sparsity
 # ========================
+# @torch.inference_mode()
+# def fidelity(graph: Data, node_set: Set[int], model: nn.Module) -> float:
+#     """
+#     Tính fidelity: sự thay đổi xác suất dự đoán khi chỉ giữ lại các node quan trọng.
+#     Ở đây tính theo tỉ lệ logit của class dự đoán (hoặc xác suất).
+#     """
+#     model.eval()
+#     device = graph.x.device
+
+#     # Ensure node_set isn't empty to avoid errors
+#     if not node_set:
+#         return 0.0
+
+#     batch = torch.zeros(graph.num_nodes, dtype=torch.long, device=device)
+
+#     # Original prediction
+#     logits = model(graph.x, graph.edge_index, graph.edge_type, batch)
+#     probs = torch.softmax(logits, dim=-1)
+
+#     # predicted_class = torch.argmax(probs, dim=-1)
+#     predicted_class = torch.argmax(probs, dim=-1).item()
+#     # Use index select for cleaner code
+#     original_score = probs[0, predicted_class].item()
+
+#     # Occluded Graph
+#     x_occluded = graph.x.clone()
+
+#     # Tìm các node KHÔNG nằm trong node_set để xóa (phép bù)
+#     all_nodes = set(range(graph.num_nodes))
+#     nodes_to_occlude = list(all_nodes - node_set)
+
+#     # Convert node_set to tensor safely
+#     # node_indices = torch.as_tensor(list(node_set), device=device, dtype=torch.long)
+#     # x_occluded[node_indices] = 0.0
+
+#     if nodes_to_occlude:
+#         occ_indices = torch.as_tensor(nodes_to_occlude, device=device, dtype=torch.long)
+#         x_occluded[occ_indices] = 0.0 # Gán các node ngoại lai bằng 0
+
+#     # Occluded prediction
+#     logits_occ = model(x_occluded, graph.edge_index, graph.edge_type, batch)
+#     probs_occ = torch.softmax(logits_occ, dim=-1)
+#     occluded_score = probs_occ[0, predicted_class].item()
+
+#     return original_score - occluded_score
+
 @torch.inference_mode()
 def fidelity(graph: Data, node_set: Set[int], model: nn.Module) -> float:
-    """
-    Tính fidelity: sự thay đổi xác suất dự đoán khi chỉ giữ lại các node quan trọng.
-    Ở đây tính theo tỉ lệ logit của class dự đoán (hoặc xác suất).
-    """
     model.eval()
     device = graph.x.device
-
-    # Ensure node_set isn't empty to avoid errors
     if not node_set:
         return 0.0
 
     batch = torch.zeros(graph.num_nodes, dtype=torch.long, device=device)
 
-    # Original prediction
+    # 1. Dự đoán trên đồ thị gốc
     logits = model(graph.x, graph.edge_index, graph.edge_type, batch)
     probs = torch.softmax(logits, dim=-1)
-
-    predicted_class = torch.argmax(probs, dim=-1)
-    # Use index select for cleaner code
+    predicted_class = torch.argmax(probs, dim=-1).item()
     original_score = probs[0, predicted_class].item()
 
-    # Occluded Graph
+    # 2. Tạo đồ thị bị che: xóa chính các node quan trọng
     x_occluded = graph.x.clone()
-    # Convert node_set to tensor safely
     node_indices = torch.as_tensor(list(node_set), device=device, dtype=torch.long)
-    x_occluded[node_indices] = 0.0
+    x_occluded[node_indices] = 0.0  # Che tập quan trọng đi
 
-    # Occluded prediction
+    # 3. Dự đoán trên đồ thị đã che
     logits_occ = model(x_occluded, graph.edge_index, graph.edge_type, batch)
     probs_occ = torch.softmax(logits_occ, dim=-1)
     occluded_score = probs_occ[0, predicted_class].item()
 
+    # Điểm càng cao chứng tỏ tập bị xóa càng quan trọng
     return original_score - occluded_score
 
 
@@ -103,7 +141,8 @@ def run_explanations(args):
     # Lọc indices theo split
     id_to_idx = {s.video_id: i for i, s in enumerate(full_dataset._samples)}
     indices = [id_to_idx[v] for v in split_set if v in id_to_idx]
-    dataset = Subset(full_dataset, indices)
+    # dataset = Subset(full_dataset, indices)
+    dataset = full_dataset[indices]
     print(f"Actual videos to process: {len(dataset)}")
 
     # 3. Load trained model (kiến trúc giống hệt train_gnn)

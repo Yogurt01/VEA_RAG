@@ -76,6 +76,22 @@ def setup_milvus_collection(client, collection_name, force=False):
 
     print(f"Collection '{collection_name}' created successfully and ready for data.")
 
+def extract_scene_id_from_path(clip_path):
+    """
+    Hàm bổ trợ trích xuất ID phân cảnh (dạng số) từ đường dẫn 'clip_path'.
+    Ví dụ: '/.../clips/clip_001_17.98-23.77.mp4' -> 1
+    """
+    if not clip_path:
+        return None
+    
+    # Lấy tên file gốc: "clip_001_17.98-23.77.mp4"
+    filename = os.path.basename(clip_path) 
+    try:
+        # Tách chuỗi theo ký tự '_' và lấy phần tử thứ 2 ('001'), sau đó ép kiểu sang int
+        return int(filename.split('_')[1])
+    except (IndexError, ValueError):
+        return None
+
 
 def prepare_milvus_payload(data_root, subgraph_dir):
     """
@@ -120,10 +136,24 @@ def prepare_milvus_payload(data_root, subgraph_dir):
             with open(json_path, 'r', encoding='utf-8') as f:
                 segments = json.load(f)
 
+            # 3. CẢI TIẾN: Tạo bản đồ tra cứu (lookup map) bằng ID thực tế từ clip_path
+            segment_map = {}
+            for i, seg in enumerate(segments):
+                scene_id_actual = extract_scene_id_from_path(seg.get('clip_path'))
+                
+                # Phương án dự phòng nếu clip_path không hợp lệ hoặc trống
+                if scene_id_actual is None:
+                    scene_id_actual = i 
+                    
+                segment_map[scene_id_actual] = seg
+
             # Process all scenes
             for idx, scene_id in enumerate(scene_ids):
                 scene_id_int = int(scene_id)
-                desc = segments[idx]
+                # desc = segments[idx]
+
+                # Tra cứu chính xác metadata dựa trên ID thực tế đã tạo ở segment_map
+                desc = segment_map.get(scene_id_int, {})
 
                 # Get caption
                 caption = desc.get('caption', '')

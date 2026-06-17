@@ -1,7 +1,9 @@
 from tqdm import tqdm
 from typing import List, Callable
 
+# pyrefly: ignore [missing-import]
 import torch.nn
+# pyrefly: ignore [missing-import]
 from torch_geometric.data import Data
 
 from .mcts import MCTS

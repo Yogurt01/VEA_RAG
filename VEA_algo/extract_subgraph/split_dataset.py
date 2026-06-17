@@ -3,8 +3,8 @@
 Run split dataset into train, val, test
 
 Usage:
-    python split_dataset.py --data_root EnTube \
-                            --split_dataset_file EnTube/dataset_splits.json
+    python split_dataset.py --data_root EnTube_Small \
+                            --split_dataset_file EnTube_Small/dataset_splits.json \
                             --train_ratio 0.8 --val_ratio 0.1 --test_ratio 0.1
 """
 
@@ -58,11 +58,16 @@ def run(args):
     # 4. Second Split: Temp into Validation and Test
     # test_size here is relative to temp_ids, so we calculate the proportion
     val_test_split_ratio = args.test_ratio / temp_ratio if temp_ratio > 0 else 0.0
+
+    # Kiểm tra xem có class nào có số lượng < 2 trong tập temp hay không
+    from collections import Counter
+    label_counts = Counter(temp_labels)
+    can_stratify = all(count >= 2 for count in label_counts.values())
     
     val_ids, test_ids, val_labels, test_labels = train_test_split(
         temp_ids, temp_labels,
         test_size=val_test_split_ratio,
-        stratify=temp_labels,
+        stratify=temp_labels if can_stratify else None,
         random_state=args.seed
     )
 

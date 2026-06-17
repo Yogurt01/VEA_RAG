@@ -72,7 +72,8 @@ def upload_single_video(tx, data):
         scene_id_int = int(scene_id)
         if scene_id_int not in important_scenes_set:
             continue
-
+        
+        # WARNING !!!
         desc = data['description'][idx]
         scene_uid = f"{video_name}_scene_{scene_id_int}"
 
@@ -94,21 +95,34 @@ def upload_single_video(tx, data):
             
             rel_type_upper = str(rel_type).strip().upper().replace(" ", "_").replace("-", "_")
 
-            link_query = f"""
-            MATCH (src:Scene {{uid: $src_uid}}), (tgt:Scene {{uid: $tgt_uid}})
-            MERGE (src)-[:{rel_type_upper}]->(tgt)
+            # link_query = f"""
+            # MATCH (src:Scene {{uid: $src_uid}}), (tgt:Scene {{uid: $tgt_uid}})
+            # MERGE (src)-[:{rel_type_upper}]->(tgt)
+            # """
+
+            link_query = """
+            MATCH (src:Scene {uid: $src_uid}), (tgt:Scene {uid: $tgt_uid})
+            CALL apoc.merge.relationship(src, $rel_type, {}, {}, tgt, {}) YIELD rel
+            RETURN rel
             """
-            tx.run(link_query, src_uid=src_uid, tgt_uid=tgt_uid)
+            tx.run(link_query, src_uid=src_uid, tgt_uid=tgt_uid, rel_type=rel_type_upper)
 
 
 def print_database_statistics(driver, db_name):
     """Print an overview of the total number of nodes and relationships."""
+    # query = """
+    # CALL { MATCH (v:Video) RETURN count(v) as total_videos }
+    # CALL { MATCH (s:Scene) RETURN count(s) as total_scenes }
+    # CALL { MATCH ()-[r]->() RETURN count(r) as total_relationships }
+    # RETURN total_videos, total_scenes, total_relationships
+    # """
     query = """
-    CALL { MATCH (v:Video) RETURN count(v) as total_videos }
-    CALL { MATCH (s:Scene) RETURN count(s) as total_scenes }
-    CALL { MATCH ()-[r]->() RETURN count(r) as total_relationships }
-    RETURN total_videos, total_scenes, total_relationships
+    MATCH (v:Video) WITH count(v) as total_videos
+    MATCH (s:Scene) WITH total_videos, count(s) as total_scenes
+    MATCH ()-[r]->()
+    RETURN total_videos, total_scenes, count(r) as total_relationships
     """
+    
     with driver.session(database=db_name) as session:
         result = session.run(query).single()
         if result:
