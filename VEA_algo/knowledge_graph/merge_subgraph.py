@@ -10,7 +10,8 @@ import torch
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 # Sửa nhanh bằng Louvain để Concept có chất lượng cao hơn:
-from networkx.community import louvain_communities   # 💡 Cần import này
+# from networkx.community import louvain_communities 
+from networkx.algorithms.community import louvain_communities   # 💡 Cần import này
 
 # Load environment variables from .env file
 load_dotenv()
