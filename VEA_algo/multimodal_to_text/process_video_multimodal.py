@@ -378,16 +378,12 @@ class Prompter:
     ## 3. Generate Visual Caption Corpus
     ## --------------------
     def _generate_caption_corpus(self):
-        # Import the standalone model wrapper
-        from qwen3_vl_visual import Qwen3VLStandalone
-        
+        from qwen_caption_worker import CaptionWorkerPool
+ 
         model_path = self.qwen_visual_model_path
-
-        # Initialize the standalone model with same parameters as original
-        model = Qwen3VLStandalone(
-            model_path=model_path,
-            total_pixels=1*1024*32*32,
-            min_pixels=64*32*32,
+        model_kwargs = dict(
+            total_pixels=1 * 1024 * 32 * 32,
+            min_pixels=64 * 32 * 32,
             max_frames=32,
             sample_fps=0.5,
             max_new_tokens=2048,
@@ -395,89 +391,162 @@ class Prompter:
             top_p=0.8,
             top_k=20,
         )
+
+        failed_log_path = self.root_dir / "failed_videos.json"
+        failed_videos = []
+        if failed_log_path.exists():
+            try:
+                with open(failed_log_path, 'r', encoding='utf-8') as f:
+                    failed_videos = json.load(f)
+            except Exception:
+                failed_videos = []
+
+        def _log_failed_video(video_name: str, reason: str):
+            failed_videos.append({
+                "video": video_name,
+                "step": "visual_caption",
+                "reason": reason,
+                "timestamp": time.time(),
+            })
+            try:
+                with open(failed_log_path, 'w', encoding='utf-8') as f:
+                    json.dump(failed_videos, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"  [WARN] Could not write failed_videos.json: {e}")
+
+        pool = CaptionWorkerPool(model_path=model_path, model_kwargs=model_kwargs)
+        try:
+            pool.start()
+        except Exception as e:
+            print(f"[FATAL] Could not start caption worker: {e}")
+            import traceback
+            traceback.print_exc()
+            return
         
-        for video_dir, video_path in zip(self.video_dirs, self.videos):
-            segment_file = video_dir / self.segmentation_filename
-            if not segment_file.exists():
-                continue
-
-            with open(segment_file, 'r', encoding='utf-8') as f:
-                segments = json.load(f)
-
-            if all(seg.get("visual_description", "").strip() for seg in segments):
-                print(f"Skipping visual caption for {video_dir.name}, already processed.")
-                continue
-
-            print(f"Processing visual captions for {video_dir.name} ({len(segments)} segments)")
-            
-            clips_dir = video_dir / self.clips_directory
-
-            for i, scene in enumerate(segments):
-                # Bỏ qua segment đã có visual_description
-                if scene.get("visual_description", "").strip():
-                    continue
-
+        try:
+            for video_dir, video_path in zip(self.video_dirs, self.videos):
                 try:
-                    clip_path = scene.get("clip_path")
-                    if clip_path is None:
-                        raise ValueError(f"clip_path missing for segment {i}")
+                    segment_file = video_dir / self.segmentation_filename
+                    if not segment_file.exists():
+                        continue
 
-                    # Resolve clip path
-                    clip_full_path = Path(clip_path)
-                    if not clip_full_path.exists():
-                        clip_full_path = clips_dir / Path(clip_path).name
-                        if not clip_full_path.exists():
-                            raise FileNotFoundError(f"Clip not found: {clip_path}")
+                    with open(segment_file, 'r', encoding='utf-8') as f:
+                        segments = json.load(f)
 
-                    # Prepare transcript context
-                    texts = scene.get("text", [])
-                    speakers = scene.get("speaker", [])
-                    transcript_parts = [
-                        f"{sp.strip()}: {t.strip()}"
-                        for sp, t in zip(speakers, texts)
-                        if sp.strip() and t.strip()
-                    ]
-                    transcript_str = " | ".join(transcript_parts)
-                    
-                    # Build prompt
-                    prompt = QWEN_PROMPT_TEMPLATE.format(transcript=transcript_str)
-                    
-                    # Run inference
-                    result = model.predict(
-                        video_path=str(clip_full_path),
-                        prompt=prompt,
-                        parse_json=True
-                    )
-                    
-                    # Handle result
-                    if isinstance(result, dict) and "_raw" not in result:
-                        segments[i]["visual_description"] = result.get("visual_description", "")
-                        segments[i]["visual_elements"] = {
-                            "mood": result.get("mood", ""),
-                            "color_temperature": result.get("color_temperature", ""),
-                            "color_saturation": result.get("color_saturation", ""),
-                            "color_lightness": result.get("color_lightness", ""),
-                            "lighting": result.get("lighting", ""),
-                            "background": result.get("background", ""),
-                        }
-                        print(f"  Segment {i}: OK")
-                    else:
-                        raw_preview = str(result)[:100] if result else "None"
-                        print(f"  Segment {i}: Parse failed, raw: {raw_preview}...")
-                        
+                    if all(seg.get("visual_description", "").strip() for seg in segments):
+                        print(f"Skipping visual caption for {video_dir.name}, already processed.")
+                        continue
+
+                    print(f"Processing visual captions for {video_dir.name} ({len(segments)} segments)")
+
+                    clips_dir = video_dir / self.clips_directory
+                    video_crash_count = 0
+                    max_crashes_per_video = 3
+
+                    for i, scene in enumerate(segments):
+                        # Bỏ qua segment đã có visual_description
+                        if scene.get("visual_description", "").strip():
+                            continue
+
+                        try:
+                            clip_path = scene.get("clip_path")
+                            if clip_path is None:
+                                raise ValueError(f"clip_path missing for segment {i}")
+
+                            # Resolve clip path
+                            clip_full_path = Path(clip_path)
+                            if not clip_full_path.exists():
+                                clip_full_path = clips_dir / Path(clip_path).name
+                                if not clip_full_path.exists():
+                                    raise FileNotFoundError(f"Clip not found: {clip_path}")
+
+                            # Prepare transcript context
+                            texts = scene.get("text", [])
+                            speakers = scene.get("speaker", [])
+                            transcript_parts = [
+                                f"{sp.strip()}: {t.strip()}"
+                                for sp, t in zip(speakers, texts)
+                                if sp.strip() and t.strip()
+                            ]
+                            transcript_str = " | ".join(transcript_parts)
+
+                            # Build prompt
+                            prompt = QWEN_PROMPT_TEMPLATE.format(transcript=transcript_str)
+
+                            # Run inference trong subprocess worker (cô lập native crash)
+                            status, payload = pool.run_task(
+                                video_path=str(clip_full_path),
+                                prompt=prompt,
+                                timeout=180,
+                            )
+
+                            if status == "ok":
+                                result = payload
+                                if isinstance(result, dict) and "_raw" not in result:
+                                    segments[i]["visual_description"] = result.get("visual_description", "")
+                                    segments[i]["visual_elements"] = {
+                                        "mood": result.get("mood", ""),
+                                        "color_temperature": result.get("color_temperature", ""),
+                                        "color_saturation": result.get("color_saturation", ""),
+                                        "color_lightness": result.get("color_lightness", ""),
+                                        "lighting": result.get("lighting", ""),
+                                        "background": result.get("background", ""),
+                                    }
+                                    print(f"  Segment {i}: OK")
+                                else:
+                                    raw_preview = str(result)[:100] if result else "None"
+                                    print(f"  Segment {i}: Parse failed, raw: {raw_preview}...")
+
+                            elif status == "crashed":
+                                video_crash_count += 1
+                                print(f"  Segment {i}: Worker CRASHED ({payload}) — skipping this clip, worker respawned.")
+                                segments[i]["visual_description_error"] = "worker_crashed"
+                                if video_crash_count >= max_crashes_per_video:
+                                    print(
+                                        f"  [ABORT VIDEO] {video_dir.name}: {video_crash_count} crashes "
+                                        f"in this video, skipping remaining segments to avoid getting stuck."
+                                    )
+                                    _log_failed_video(
+                                        video_dir.name,
+                                        f"{video_crash_count} worker crashes (segment {i} last)",
+                                    )
+                                    break
+
+                            elif status == "timeout":
+                                print(f"  Segment {i}: Worker TIMEOUT ({payload}) — skipping this clip.")
+                                segments[i]["visual_description_error"] = "worker_timeout"
+
+                            else:  # status == "error" (lỗi Python bình thường trong worker, vd parse JSON)
+                                print(f"  Segment {i}: Error - {payload}")
+                                segments[i]["visual_description_error"] = "predict_error"
+
+                        except Exception as e:
+                            print(f"  Segment {i}: Error - {e}")
+                            continue
+
+                    # Lưu toàn bộ sau khi xử lý xong video (kể cả khi bị abort giữa chừng)
+                    with open(segment_file, 'w', encoding='utf-8') as f:
+                        json.dump(segments, f, indent=2, ensure_ascii=False)
+                    print(f"Saved updated segments for {video_dir.name}")
+
                 except Exception as e:
-                    print(f"  Segment {i}: Error - {e}")
+                    # Lỗi Python bình thường ở cấp video (vd JSON hỏng, IO lỗi) -> log và
+                    # bỏ qua folder này, tiếp tục các folder tiếp theo.
+                    print(f"[ERROR] Video {video_dir.name} failed entirely: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    _log_failed_video(video_dir.name, str(e))
                     continue
-            
-            # Lưu toàn bộ sau khi xử lý xong video
-            with open(segment_file, 'w', encoding='utf-8') as f:
-                json.dump(segments, f, indent=2, ensure_ascii=False)
-            print(f"Saved updated segments for {video_dir.name}")
-
-        # Cleanup
-        del model
-        self._clean_memory()
-    
+        finally:
+            pool.stop()
+            self._clean_memory()
+ 
+        if failed_videos:
+            print(
+                f"\n[SUMMARY] {len(failed_videos)} video(s) had issues during visual captioning. "
+                f"See {failed_log_path} for details."
+            )
+        
     ## --------------------
     ## 4. Generate Scene Caption
     ## --------------------
