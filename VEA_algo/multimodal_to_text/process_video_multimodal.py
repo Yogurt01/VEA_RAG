@@ -16,11 +16,8 @@ import torch
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 
-from scenedetect import AdaptiveDetector
-from segment import scene_detection, segment_with_stt_timestamp, get_video_duration, fallback_boundaries
-
-os.environ["HF_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/huggingface_cache"
-os.environ["TORCH_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/torch_cache"
+os.environ["HF_HOME"] = "/models/huggingface_cache"
+os.environ["TORCH_HOME"] = "/models/torch_cache"
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 
@@ -146,9 +143,34 @@ class Prompter:
         self.delete_clips = args.delete_clips
 
         # Get all video directory paths, optionally limited
-        all_video_dirs = sorted([d for d in self.root_dir.iterdir() if d.is_dir()])
-        limit = getattr(args, 'limit_videos', None)
-        self.video_dirs = all_video_dirs[:limit] if limit and limit > 0 else all_video_dirs
+        all_video_dirs = sorted([
+            d for d in self.root_dir.iterdir()
+            if d.is_dir()
+        ])
+        
+        pending_video_dirs = []
+        skipped_count = 0
+
+        for vdir in all_video_dirs:
+            if self._is_video_fully_processed(vdir):
+                skipped_count += 1
+                continue
+
+            pending_video_dirs.append(vdir)
+
+        limit = getattr(args, "limit_videos", 0)
+
+        if limit and limit > 0:
+            self.video_dirs = pending_video_dirs[:limit]
+        else:
+            self.video_dirs = pending_video_dirs
+
+        print(
+            f"Found {len(all_video_dirs)} video folders | "
+            f"Completed: {skipped_count} | "
+            f"Pending: {len(pending_video_dirs)} | "
+            f"Selected: {len(self.video_dirs)}"
+        )
         
         self.videos = []
         for vdir in self.video_dirs:
@@ -162,6 +184,15 @@ class Prompter:
         self.qwen_vl_embedding_model_path = args.qwen_vl_embedding_model_path
         self.beat_checkpoint_path = args.beat_checkpoint_path
 
+    def _is_video_fully_processed(self, video_dir: Path) -> bool:
+        segment_file = video_dir / self.segmentation_filename
+        embedding_file = video_dir / self.embedding_filename
+
+        return (
+            segment_file.exists()
+            and embedding_file.exists()
+            and embedding_file.stat().st_size > 0
+        )
 
     def _clean_memory(self):
         """
@@ -181,6 +212,9 @@ class Prompter:
     ## 1. Video Segmentation
     ## --------------------
     def _segment_videos(self):
+        from scenedetect import AdaptiveDetector
+        from segment import scene_detection, segment_with_stt_timestamp, fallback_boundaries
+
         for video_dir, video_path in zip(self.video_dirs, self.videos):
             if video_path is None:
                 print(f"[SKIP] {video_dir.name}: no .mp4")
@@ -260,6 +294,7 @@ class Prompter:
 
     def _create_default_segment(self, video_path, segment_file_path):
         """Tạo 1 segment duy nhất bao toàn bộ video (last-resort fallback)."""
+        from segment import get_video_duration
         try:
             duration = get_video_duration(str(video_path))
             default  = [{
@@ -369,41 +404,44 @@ class Prompter:
             with open(segment_file, 'r', encoding='utf-8') as f:
                 segments = json.load(f)
 
-            if all("visual_description" in seg for seg in segments):
+            if all(seg.get("visual_description", "").strip() for seg in segments):
                 print(f"Skipping visual caption for {video_dir.name}, already processed.")
                 continue
 
             print(f"Processing visual captions for {video_dir.name} ({len(segments)} segments)")
             
             clips_dir = video_dir / self.clips_directory
-            
-            for i, scene in enumerate(segments):
-                clip_path = scene.get("clip_path")
-                if clip_path is None:
-                    continue
-                
-                # Resolve clip path relative to clips directory
-                clip_full_path = Path(clip_path)
-                if not clip_full_path.exists():
-                    clip_full_path = clips_dir / Path(clip_path).name
-                    if not clip_full_path.exists():
-                        print(f"  Segment {i}: Clip not found: {clip_path}")
-                        continue
 
-                # Prepare transcript context
-                texts = scene.get("text", [])
-                speakers = scene.get("speaker", [])
-                transcript_parts = [
-                    f"{sp.strip()}: {t.strip()}"
-                    for sp, t in zip(speakers, texts)
-                    if sp.strip() and t.strip()
-                ]
-                transcript_str = " | ".join(transcript_parts)
-                
-                # Build prompt
-                prompt = QWEN_PROMPT_TEMPLATE.format(transcript=transcript_str)
-                
+            for i, scene in enumerate(segments):
+                # Bỏ qua segment đã có visual_description
+                if scene.get("visual_description", "").strip():
+                    continue
+
                 try:
+                    clip_path = scene.get("clip_path")
+                    if clip_path is None:
+                        raise ValueError(f"clip_path missing for segment {i}")
+
+                    # Resolve clip path
+                    clip_full_path = Path(clip_path)
+                    if not clip_full_path.exists():
+                        clip_full_path = clips_dir / Path(clip_path).name
+                        if not clip_full_path.exists():
+                            raise FileNotFoundError(f"Clip not found: {clip_path}")
+
+                    # Prepare transcript context
+                    texts = scene.get("text", [])
+                    speakers = scene.get("speaker", [])
+                    transcript_parts = [
+                        f"{sp.strip()}: {t.strip()}"
+                        for sp, t in zip(speakers, texts)
+                        if sp.strip() and t.strip()
+                    ]
+                    transcript_str = " | ".join(transcript_parts)
+                    
+                    # Build prompt
+                    prompt = QWEN_PROMPT_TEMPLATE.format(transcript=transcript_str)
+                    
                     # Run inference
                     result = model.predict(
                         video_path=str(clip_full_path),
@@ -431,7 +469,7 @@ class Prompter:
                     print(f"  Segment {i}: Error - {e}")
                     continue
             
-            # Save updated segments
+            # Lưu toàn bộ sau khi xử lý xong video
             with open(segment_file, 'w', encoding='utf-8') as f:
                 json.dump(segments, f, indent=2, ensure_ascii=False)
             print(f"Saved updated segments for {video_dir.name}")
@@ -470,7 +508,7 @@ class Prompter:
                 with open(segment_file, 'r', encoding='utf-8') as f:
                     segments = json.load(f)
 
-                if all("caption" in seg for seg in segments):
+                if all(seg.get("caption", "").strip() for seg in segments):
                     print(f"Skipping {video_dir.name}: already processed")
                     continue
 

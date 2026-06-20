@@ -13,8 +13,8 @@ import whisperx
 from whisperx.diarize import DiarizationPipeline
 from tqdm import tqdm
 
-os.environ["HF_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/huggingface_cache"
-os.environ["TORCH_HOME"] = "/content/drive/MyDrive/KhoaLuan/models/torch_cache"
+os.environ["HF_HOME"] = "/models/huggingface_cache"
+os.environ["TORCH_HOME"] = "/models/torch_cache"
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 
