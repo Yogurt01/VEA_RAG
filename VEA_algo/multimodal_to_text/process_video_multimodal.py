@@ -931,72 +931,143 @@ class Prompter:
     ## 6. Generate Scene Embedding
     ## --------------------
     def _generate_scene_embeddings(self, force_recompute=False):
-        from qwen3_vl_embedding import Qwen3VLEmbedder
-	
+        from qwen_embedding_worker import EmbeddingWorkerPool
+
         model_path = self.qwen_vl_embedding_model_path
-            
-        # Initialize the embedding model with bfloat16 for inference efficiency
-        embedder = Qwen3VLEmbedder(
-            model_name_or_path=model_path,
-            torch_dtype=torch.bfloat16
+
+        failed_log_path = self.root_dir / "failed_videos.json"
+        failed_videos = []
+        if failed_log_path.exists():
+            try:
+                with open(failed_log_path, 'r', encoding='utf-8') as f:
+                    failed_videos = json.load(f)
+            except Exception:
+                failed_videos = []
+
+        def _log_failed_video(video_name: str, reason: str):
+            failed_videos.append({
+                "video": video_name,
+                "step": "scene_embedding",
+                "reason": reason,
+                "timestamp": time.time(),
+            })
+            try:
+                with open(failed_log_path, 'w', encoding='utf-8') as f:
+                    json.dump(failed_videos, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"  [WARN] Could not write failed_videos.json: {e}")
+
+        pool = EmbeddingWorkerPool(
+            model_path=model_path,
+            model_kwargs={},
         )
+        try:
+            pool.start()
+        except Exception as e:
+            print(f"[FATAL] Could not start embedding worker: {e}")
+            import traceback
+            traceback.print_exc()
+            return
 
-        for video_dir in self.video_dirs:
-            segment_file = video_dir / self.segmentation_filename
-            if not segment_file.exists():
-                continue
+        try:
+            for video_dir in self.video_dirs:
+                try:
+                    segment_file = video_dir / self.segmentation_filename
+                    if not segment_file.exists():
+                        continue
 
-            with open(segment_file, 'r', encoding='utf-8') as f:
-                segments = json.load(f)
+                    with open(segment_file, 'r', encoding='utf-8') as f:
+                        segments = json.load(f)
 
-            embedding_file = video_dir / self.embedding_filename
+                    embedding_file = video_dir / self.embedding_filename
 
-            if embedding_file.exists() and not force_recompute:
-                print(f"Skipping {video_dir.name}: Embeddings already exist.")
-                continue
+                    if embedding_file.exists() and not force_recompute:
+                        print(f"Skipping {video_dir.name}: Embeddings already exist.")
+                        continue
 
-            scene_embeddings = {}
+                    print(f"Processing embeddings for {video_dir.name} ({len(segments)} segments)")
 
-            for i, scene in enumerate(segments):
-                clip_path = scene.get("clip_path")
-                if not clip_path or not Path(clip_path).exists():
-                    print(f"Scene {i} missing clip, skip")
+                    scene_embeddings = {}
+                    video_crash_count = 0
+                    max_crashes_per_video = 3
+
+                    for i, scene in enumerate(segments):
+                        clip_path = scene.get("clip_path")
+                        if not clip_path or not Path(clip_path).exists():
+                            print(f"Scene {i} missing clip, skip")
+                            continue
+
+                        try:
+                            text_prompt = self._build_unified_embedding_text(scene)
+
+                            status, payload = pool.run_task(
+                                text=text_prompt,
+                                video_path=clip_path,
+                                timeout=180,
+                            )
+
+                            if status == "ok":
+                                scene_embeddings[i] = torch.from_numpy(payload).to(torch.float32)
+
+                            elif status == "crashed":
+                                video_crash_count += 1
+                                print(f"  Scene {i}: Worker CRASHED ({payload}) — skipping this scene, worker respawned.")
+                                if video_crash_count >= max_crashes_per_video:
+                                    print(
+                                        f"  [ABORT VIDEO] {video_dir.name}: {video_crash_count} crashes "
+                                        f"in this video, skipping remaining scenes to avoid getting stuck."
+                                    )
+                                    _log_failed_video(
+                                        video_dir.name,
+                                        f"{video_crash_count} worker crashes (scene {i} last)",
+                                    )
+                                    break
+
+                            elif status == "timeout":
+                                print(f"  Scene {i}: Worker TIMEOUT ({payload}) — skipping this scene.")
+
+                            else:  # status == "error"
+                                print(f"  Scene {i}: Error - {payload}")
+
+                        except Exception as e:
+                            print(f"  Scene {i}: Error - {e}")
+                            continue
+
+                    if not scene_embeddings:
+                        print(f"  No embeddings generated for {video_dir.name}, skip saving.")
+                        continue
+
+                    # Sort by scene index to ensure temporal and structural alignment
+                    sorted_indices = sorted(scene_embeddings.keys())
+                    stacked_embeddings = torch.stack([scene_embeddings[i] for i in sorted_indices])
+
+                    # Save the feature matrix along with metadata for reproducibility
+                    torch.save({
+                        "embeddings": stacked_embeddings,
+                        "scene_ids": sorted_indices,
+                        "metadata": {
+                            "model": "Qwen3-VL-Embedding-2B",
+                            "embed_dim": 2048,
+                            "created_at": time.ctime(),
+                        }
+                    }, embedding_file)
+                    print(f"Saved embeddings for {video_dir.name} ({len(sorted_indices)}/{len(segments)} scenes)")
+
+                except Exception as e:
+                    print(f"[ERROR] Video {video_dir.name} failed entirely: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    _log_failed_video(video_dir.name, str(e))
                     continue
+        finally:
+            pool.stop()
+            self._clean_memory()
 
-                # Construct the multimodal prompt incorporating all extracted metadata
-                text_prompt = self._build_unified_embedding_text(scene)
-
-                inputs = [{
-                    "text": text_prompt,
-                    "video": clip_path
-                }]
-
-                # Generate the 2048-dimensional embedding
-                emb = embedder.process(inputs)
-
-                # Move to CPU and cast to float32 for downstream GNN compatibility
-                scene_embeddings[i] = emb[0].cpu().to(torch.float32) 
-
-            if not scene_embeddings:
-                continue
-
-            # Sort by scene index to ensure temporal and structural alignment
-            sorted_indices = sorted(scene_embeddings.keys())
-            scene_embeddings = torch.stack([scene_embeddings[i] for i in sorted_indices])
-
-            # Save the feature matrix along with metadata for reproducibility
-            torch.save({
-                "embeddings": scene_embeddings,
-                "scene_ids": sorted_indices,
-                "metadata": {
-                    "model": "Qwen3-VL-Embedding-2B",
-                    "embed_dim": 2048,
-                    "created_at": time.ctime(),
-                }
-            }, embedding_file)
-
-        del embedder
-        self._clean_memory()
+        if failed_videos:
+            print(
+                f"\n[SUMMARY] {len(failed_videos)} video(s) had issues during embedding generation. "
+                f"See {failed_log_path} for details."
+            )
 
     def _build_unified_embedding_text(self, scene: dict) -> str:
         # Format the spoken transcript with speaker labels
@@ -1075,7 +1146,6 @@ Vibes: {", ".join(scene.get("audio_vibes", [])) or "none"}"""
                     print(f"  [ERROR] Failed to delete {clips_dir}: {e}")
         
         print(f"Cleanup completed: {deleted_count}/{len(self.video_dirs)} clips directories fully removed")
-
 
     ## --------------------
     ## MAIN PIPELINE RUNNING
