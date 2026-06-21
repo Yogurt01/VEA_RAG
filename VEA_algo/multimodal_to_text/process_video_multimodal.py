@@ -988,8 +988,8 @@ class Prompter:
                     print(f"Processing embeddings for {video_dir.name} ({len(segments)} segments)")
 
                     scene_embeddings = {}
-                    video_crash_count = 0
-                    max_crashes_per_video = 3
+                    video_has_error = False
+                    error_reason = ""
 
                     for i, scene in enumerate(segments):
                         clip_path = scene.get("clip_path")
@@ -1010,28 +1010,33 @@ class Prompter:
                                 scene_embeddings[i] = torch.from_numpy(payload).to(torch.float32)
 
                             elif status == "crashed":
-                                video_crash_count += 1
-                                print(f"  Scene {i}: Worker CRASHED ({payload}) — skipping this scene, worker respawned.")
-                                if video_crash_count >= max_crashes_per_video:
-                                    print(
-                                        f"  [ABORT VIDEO] {video_dir.name}: {video_crash_count} crashes "
-                                        f"in this video, skipping remaining scenes to avoid getting stuck."
-                                    )
-                                    _log_failed_video(
-                                        video_dir.name,
-                                        f"{video_crash_count} worker crashes (scene {i} last)",
-                                    )
-                                    break
+                                print(f"  Scene {i}: Worker CRASHED ({payload}) — aborting this video, worker respawned.")
+                                video_has_error = True
+                                error_reason = f"worker crashed at scene {i}: {payload}"
+                                break
 
                             elif status == "timeout":
-                                print(f"  Scene {i}: Worker TIMEOUT ({payload}) — skipping this scene.")
+                                print(f"  Scene {i}: Worker TIMEOUT ({payload}) — aborting this video.")
+                                video_has_error = True
+                                error_reason = f"worker timeout at scene {i}: {payload}"
+                                break
 
                             else:  # status == "error"
-                                print(f"  Scene {i}: Error - {payload}")
+                                print(f"  Scene {i}: Error - {payload} — aborting this video.")
+                                video_has_error = True
+                                error_reason = f"predict error at scene {i}: {payload}"
+                                break
 
                         except Exception as e:
-                            print(f"  Scene {i}: Error - {e}")
-                            continue
+                            print(f"  Scene {i}: Error - {e} — aborting this video.")
+                            video_has_error = True
+                            error_reason = f"exception at scene {i}: {e}"
+                            break
+
+                    if video_has_error:
+                        print(f"  [SKIP VIDEO] {video_dir.name}: {error_reason} — not saving scene_embeddings.pt.")
+                        _log_failed_video(video_dir.name, error_reason)
+                        continue
 
                     if not scene_embeddings:
                         print(f"  No embeddings generated for {video_dir.name}, skip saving.")
