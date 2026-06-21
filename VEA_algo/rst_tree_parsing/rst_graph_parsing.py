@@ -208,7 +208,7 @@ class RSTCaptionGraphBuilder:
         self.repo_root = REPO_ROOT
 
     def _video_dirs(self) -> Iterable[Path]:
-        for p in sorted(self.videos_root.iterdir()):
+        for p in sorted(self.root_dir.iterdir()):
             if p.is_dir():
                 yield p
 

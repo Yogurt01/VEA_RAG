@@ -27,6 +27,7 @@ class RSTTreeParser:
         self.rel_type = args.rel_type
         self.corpus = args.corpus
         self.dataset_file = Path(args.dataset_file)
+        self.limit_videos = getattr(args, "limit_videos", 0)
 
         self.model_type_list = self._get_model_type_list()
 
@@ -127,6 +128,30 @@ class RSTTreeParser:
             else:
                 print(f"{doc_id}: no video_dir, pass")
 
+    def _filter_already_processed(self, dataset):
+        pending = []
+        skipped_count = 0
+
+        for doc in dataset:
+            video_dir = doc.get("video_dir")
+            if not video_dir:
+                pending.append(doc)
+                continue
+
+            rst_tree_path = Path(video_dir) / "rst_tree.tree"
+            if rst_tree_path.exists():
+                skipped_count += 1
+                continue
+
+            pending.append(doc)
+
+        print(
+            f"Found {len(dataset)} docs total | "
+            f"Already processed (skipped): {skipped_count} | "
+            f"Pending: {len(pending)}"
+        )
+        return pending
+
     def run(self):
         start_time = time.time()
         print("=" * 80)
@@ -140,6 +165,21 @@ class RSTTreeParser:
         with open(self.dataset_file, "r", encoding="utf-8") as f:
             dataset = json.load(f)
         print(f"{len(dataset)} docs from {self.dataset_file}")
+
+        # Bỏ qua các doc đã có rst_tree.tree từ trước
+        dataset = self._filter_already_processed(dataset)
+
+        if not dataset:
+            print("\nKhông còn doc nào cần parse. Bỏ qua việc load model.")
+            return
+
+        if self.limit_videos and self.limit_videos > 0:
+            total_pending = len(dataset)
+            dataset = dataset[: self.limit_videos]
+            print(
+                f"Limiting to {len(dataset)}/{total_pending} pending docs "
+                f"for this run (--limit_videos={self.limit_videos})"
+            )
 
         doc_id_to_video_dir = {
             doc["doc_id"]: doc["video_dir"]
@@ -167,13 +207,14 @@ class RSTTreeParser:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RST Tree parsing cho video captions")
 
-    parser.add_argument("--base_model_name", type=str, default="/content/drive/MyDrive/KhoaLuan/models/Llama-2-7b-hf")
-    parser.add_argument('--adapter_base_path', type=str, default='/content/drive/MyDrive/KhoaLuan/models/adapters')
+    parser.add_argument("--base_model_name", type=str, default="/media/nthuy05/models/Llama-2-7b-hf")
+    parser.add_argument('--adapter_base_path', type=str, default='/media/nthuy05/models/adapters')
     parser.add_argument("--model_size", type=str, default="7b", choices=["7b", "13b", "70b"])
     parser.add_argument("--parse_type", type=str, default="bottom_up", choices=["bottom_up", "top_down"])
     parser.add_argument("--rel_type", type=str, default="rel_with_nuc", choices=["rel", "nuc_rel", "rel_with_nuc"])
     parser.add_argument("--corpus", type=str, default="rstdt", choices=["rstdt", "instrdt", "gum"])
-    parser.add_argument("--dataset_file", type=str, default="/content/drive/MyDrive/KhoaLuan/EnTube/edu_dataset.json", required=True, help="Path to file JSON: list[{doc_id, edu_strings, video_dir?}]")
+    parser.add_argument("--dataset_file", type=str, default="/media/nthuy05/EnTube/edu_dataset.json", required=True, help="Path to file JSON: list[{doc_id, edu_strings, video_dir?}]")
+    parser.add_argument("--limit_videos", type=int, default=0, help="Giới hạn số doc xử lý trong lần chạy này, tính sau khi đã lọc các doc đã có rst_tree.tree (0 = không giới hạn).")
 
     args = parser.parse_args()
 
