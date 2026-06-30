@@ -78,8 +78,8 @@ def upload_single_video_full(tx, data: dict) -> None:
         )
 
     for src, tgt, rel_type in data.get('rst_links', []):
-        src_int        = int(src)
-        tgt_int        = int(tgt)
+        src_int = int(src) - 1
+        tgt_int = int(tgt) - 1
         rel_type_upper = str(rel_type).strip().upper().replace(" ", "_").replace("-", "_")
 
         tx.run(
