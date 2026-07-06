@@ -19,7 +19,6 @@ load_dotenv()
 
 CLUSTER_ENDPOINT = os.getenv("MILVUS_CLUSTER_ENDPOINT")
 TOKEN            = os.getenv("MILVUS_TOKEN")
-COLLECTION_NAME  = os.getenv("MILVUS_COLLECTION_NAME")
 BATCH_SIZE       = 1000
 
 
@@ -212,10 +211,10 @@ def main(args: argparse.Namespace) -> None:
         print(f"Error: Split JSON file not found at '{split_path}'")
         return
 
-    if not all([CLUSTER_ENDPOINT, TOKEN, COLLECTION_NAME]):
+    if not all([CLUSTER_ENDPOINT, TOKEN]):
         raise ValueError(
             "Missing Milvus environment variables. "
-            "Please set MILVUS_CLUSTER_ENDPOINT, MILVUS_TOKEN, MILVUS_COLLECTION_NAME."
+            "Please set MILVUS_CLUSTER_ENDPOINT, MILVUS_TOKEN."
         )
 
     # Đọc split JSON
@@ -232,16 +231,17 @@ def main(args: argparse.Namespace) -> None:
 
     print("Initializing Milvus upload pipeline...")
     client = MilvusClient(uri=CLUSTER_ENDPOINT, token=TOKEN)
+    content_collection_name = args.content_collection_name or os.getenv("MILVUS_CONTENT_COLLECTION_NAME")
 
     try:
         # 1. Setup collection
-        setup_milvus_collection(client, COLLECTION_NAME, force=args.force)
+        setup_milvus_collection(client, content_collection_name, force=args.force)
 
         # 2. Chuẩn bị dữ liệu (chỉ train + val)
         payload = prepare_milvus_payload(data_root, include_videos)
 
         # 3. Insert
-        insert_to_milvus(client, COLLECTION_NAME, payload)
+        insert_to_milvus(client, content_collection_name, payload)
 
         print("\nPipeline completed successfully.")
 
@@ -273,6 +273,11 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Path to dataset_splits.json file (must contain 'train' and 'val' lists of video IDs).",
+    )
+    parser.add_argument(
+        "--content_collection_name",
+        type=str,
+        required=True
     )
     parser.add_argument(
         "--force",
