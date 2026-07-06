@@ -101,9 +101,9 @@ def evaluate_content(args: argparse.Namespace) -> None:
     data_root = Path(args.data_root)
     video_reps_dir = Path(args.video_reps_dir)
 
-    collection_name = os.getenv("MILVUS_COLLECTION_NAME")
-    if not all([CLUSTER_ENDPOINT, TOKEN, collection_name]):
-        raise ValueError("Missing MILVUS_CLUSTER_ENDPOINT/MILVUS_TOKEN/MILVUS_COLLECTION_NAME.")
+    collection_name = args.content_collection_name or os.getenv("MILVUS_CONTENT_COLLECTION_NAME")
+    if not all([CLUSTER_ENDPOINT, TOKEN]):
+        raise ValueError("Missing MILVUS_CLUSTER_ENDPOINT/MILVUS_TOKEN.")
 
     reps = torch.load(video_reps_dir / "video_representations.pt", map_location="cpu")
     test_folders = load_test_videos(data_root, Path(args.split_file))
@@ -317,6 +317,7 @@ if __name__ == "__main__":
     p_content = subparsers.add_parser("content", help="Evaluate Content Similarity lean accuracy.")
     p_content.add_argument("--data_root", type=str, required=True)
     p_content.add_argument("--split_file", type=str, required=True)
+    p_content.add_argument("--content_collection_name", type=str, required=True)
     p_content.add_argument("--video_reps_dir", type=str, required=True)
     p_content.add_argument("--top_k", type=int, default=5)
     p_content.add_argument("--search_limit", type=int, default=50,
