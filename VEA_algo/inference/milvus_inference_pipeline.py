@@ -141,6 +141,26 @@ CALIBRATION_NOTE = (
     "either direction."
 )
 
+CONTENT_PATTERN_NOTES = (
+    "Patterns observed across labeled videos (use as heuristics, not strict rules):\n"
+    "- High Engagement often builds toward one specific, concrete payoff — a question "
+    "resolving into a clear answer, a warning resolving into an explained consequence, a "
+    "setup resolving into a reveal. Vague or generic content without such a payoff is a "
+    "weaker signal, even if the scenes are visually well-connected.\n"
+    "- High Engagement can also come from a distinctive personality, humor, or a specific, "
+    "pointed opinion/claim — even when the scene-to-scene structure doesn't follow a classic "
+    "arc. Do not penalize a video just for lacking a tidy narrative arc if it has a strong, "
+    "specific hook of this kind (e.g., a bold claim, a recognizable personality, a comedic "
+    "turn).\n"
+    "- A well-connected, logically coherent sequence of scenes is NOT by itself evidence of "
+    "High Engagement — competent-but-generic content (routine performances, standard product/"
+    "retail displays, common recurring content formats) can be perfectly coherent and still "
+    "unremarkable. Ask whether the content itself is distinctive, not just whether the scenes "
+    "connect logically.\n"
+    "- Low Engagement often shows abrupt topic jumps that don't build toward anything, or "
+    "claims that stay broad and undeveloped rather than getting more specific."
+)
+
 
 def build_system_prompt(evidence_mode: str) -> str:
     active_docs = []
@@ -167,6 +187,8 @@ and provide a final engagement prediction.
 Label definitions:
 {_label_def_lines}
 IMPORTANT: Only two labels exist — 0 and 1.
+
+{CONTENT_PATTERN_NOTES}
 
 {reference_block}
 
@@ -201,7 +223,7 @@ def evidence_lean_and_confidence(n_pos: int, n_total: int):
 
 
 # ==========================================
-# 5. CONTEXT BUILDER — CONTENT SIMILARITY
+# 5. CONTEXT BUILDER — CONTENT SIMILARITY (dedupe theo video)
 # ==========================================
 
 def dedupe_content_hits_by_video(search_results, top_k: int) -> list:
@@ -777,11 +799,11 @@ def main(args: argparse.Namespace) -> None:
     need_content = evidence_mode in ("content", "full")
     need_edge    = evidence_mode in ("edge", "full")
 
-    milvus_client           = None
-    content_collection_name = None
-    edge_collection_name    = None
-    reps_by_folder          = {}
-    prior_scores            = {}
+    milvus_client         = None
+    collection_name       = None
+    edge_collection_name  = None
+    reps_by_folder        = {}
+    prior_scores          = {}
 
     if need_content or need_edge:
         milvus_endpoint = os.getenv("MILVUS_CLUSTER_ENDPOINT")
@@ -791,9 +813,9 @@ def main(args: argparse.Namespace) -> None:
         milvus_client = MilvusClient(uri=milvus_endpoint, token=milvus_token)
 
     if need_content:
-        content_collection_name = args.content_collection_name or os.getenv("MILVUS_CONTENT_COLLECTION_NAME")
-        if not content_collection_name:
-            raise ValueError("Missing MILVUS_CONTENT_COLLECTION_NAME env var (required for evidence_mode='content'/'full').")
+        collection_name = args.content_collection_name or os.getenv("MILVUS_COLLECTION_NAME")
+        if not collection_name:
+            raise ValueError("Missing collection name: pass --content_collection_name or set MILVUS_COLLECTION_NAME env var (required for evidence_mode='content'/'full').")
         if not args.video_reps_dir:
             raise ValueError("--video_reps_dir is required when evidence_mode is 'content' or 'full'.")
         reps_by_folder = load_video_representations(Path(args.video_reps_dir))
@@ -866,7 +888,7 @@ def main(args: argparse.Namespace) -> None:
                 if rep_vec is None:
                     raise ValueError("Missing video representation")
                 res = milvus_client.search(
-                    collection_name=content_collection_name,
+                    collection_name=collection_name,
                     data=[rep_vec.tolist()],
                     limit=args.content_search_limit,
                     output_fields=MILVUS_OUTPUT_FIELDS,
@@ -1008,15 +1030,16 @@ if __name__ == "__main__":
                     "exposed hyperparameters for sweeping.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--data_root",               type=str, required=True)
-    parser.add_argument("--split_file",              type=str, required=True)
-    parser.add_argument("--checkpoint_path",         type=str, required=True)
-    parser.add_argument("--evidence_mode",           type=str, default="full", choices=EVIDENCE_MODE_CHOICES)
-    parser.add_argument("--content_collection_name", type=str, default=None)
-    parser.add_argument("--video_reps_dir",          type=str, default=None)
-    parser.add_argument("--edge_index_dir",          type=str, default=None)
-    parser.add_argument("--edge_collection_name",    type=str, default=None)
-    parser.add_argument("--model_name",              type=str, default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--data_root",         type=str, required=True)
+    parser.add_argument("--split_file",        type=str, required=True)
+    parser.add_argument("--checkpoint_path",   type=str, required=True)
+    parser.add_argument("--evidence_mode",     type=str, default="full", choices=EVIDENCE_MODE_CHOICES)
+    parser.add_argument("--content_collection_name", type=str, default=None,
+                        help="Milvus collection cho Content Similarity. Mặc định env MILVUS_CONTENT_COLLECTION_NAME.")
+    parser.add_argument("--video_reps_dir",    type=str, default=None)
+    parser.add_argument("--edge_index_dir",    type=str, default=None)
+    parser.add_argument("--edge_collection_name", type=str, default=None)
+    parser.add_argument("--model_name",        type=str, default=DEFAULT_MODEL_NAME)
 
     # --- Content Similarity hyperparameters ---
     parser.add_argument("--content_top_k", type=int, default=5,

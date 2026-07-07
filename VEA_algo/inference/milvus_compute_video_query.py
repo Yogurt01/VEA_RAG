@@ -11,8 +11,15 @@ Usage:
         --split_file      /path/to/dataset_splits.json \
         --output_dir      /path/to/video_representations \
         --embedding_model_name /path/to/Qwen3-VL-Embedding-2B \
+        [--split_key      test] \
         [--temperature    0.01] \
         [--device         cuda]
+
+--split_key: 'test' (mặc định, dùng cho pipeline chính thức) hoặc 'val' (dùng khi cần
+tính representation cho tập val để sweep hyperparameter qua evaluate_evidence_lean.py,
+tránh tune trực tiếp trên test). Khi dùng 'val', TRỎ --output_dir SANG THƯ MỤC KHÁC
+với thư mục dùng cho 'test' — cả 2 đều lưu file tên "video_representations.pt", dùng
+chung thư mục sẽ ghi đè lẫn nhau.
 
 Output (trong --output_dir, tách embeddings/metadata cho gọn và tải nhanh —
 đồng bộ với convention scene_embeddings.pt của project):
@@ -28,23 +35,22 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from qwen3_vl_embedding import Qwen3VLEmbedder
 
 
-# script_dir = Path(__file__).resolve().parent
-# multimodal_to_text_dir = script_dir.parent / "multimodal_to_text"
-# if multimodal_to_text_dir.exists():
-#     sys.path.insert(0, str(multimodal_to_text_dir))
-# else:
-#     # Fallback: thử tìm trong thư mục hiện tại
-#     sys.path.insert(0, str(script_dir))
+script_dir = Path(__file__).resolve().parent
+multimodal_to_text_dir = script_dir.parent / "multimodal_to_text"
+if multimodal_to_text_dir.exists():
+    sys.path.insert(0, str(multimodal_to_text_dir))
+else:
+    # Fallback: thử tìm trong thư mục hiện tại
+    sys.path.insert(0, str(script_dir))
 
-# try:
-#     from qwen3_vl_embedding import Qwen3VLEmbedder
-# except ImportError as e:
-#     print(f"[ERROR] Cannot import Qwen3VLEmbedder: {e}")
-#     print("Please ensure qwen3_vl_embedding.py is in the 'multimodal_to_text' folder.")
-#     raise
+try:
+    from qwen3_vl_embedding import Qwen3VLEmbedder
+except ImportError as e:
+    print(f"[ERROR] Cannot import Qwen3VLEmbedder: {e}")
+    print("Please ensure qwen3_vl_embedding.py is in the 'multimodal_to_text' folder.")
+    raise
 
 
 # ==========================================
@@ -162,17 +168,21 @@ def cross_modal_self_query(
 def load_valid_videos(
     data_root: Path,
     split_file: Path,
+    split_key: str = "test",
 ) -> tuple[List[str], Dict[str, Any], List[tuple]]:
-    """Load danh sách video hợp lệ từ split file."""
+    """Load danh sách video hợp lệ từ split file. split_key: 'test' (mặc định) hoặc 'val'
+    (dùng khi cần tính representation cho tập val để sweep hyperparameter)."""
     with open(split_file, 'r') as f:
         splits = json.load(f)
-    test_folders = splits.get("test", [])
+    target_folders = splits.get(split_key, [])
+    if not target_folders:
+        print(f"[WARNING] split_file has no entries under key '{split_key}'.")
 
     valid_folders: List[str] = []
     valid_data: Dict[str, Any] = {}
     invalid_folders: List[tuple] = []
 
-    for folder_name in test_folders:
+    for folder_name in target_folders:
         folder_path = data_root / folder_name
         emb_path = folder_path / "scene_embeddings.pt"
         seg_path = folder_path / "segments.json"
@@ -222,7 +232,8 @@ def main(args: argparse.Namespace) -> None:
     print("[INFO] Embedder loaded.\n")
 
     # 2. Load valid videos
-    valid_folders, valid_data, invalid_folders = load_valid_videos(data_root, split_file)
+    print(f"[INFO] split_key = '{args.split_key}'")
+    valid_folders, valid_data, invalid_folders = load_valid_videos(data_root, split_file, args.split_key)
     print(f"Validation: {len(valid_folders)} valid, {len(invalid_folders)} invalid.")
     for f, reason in invalid_folders[:5]:
         print(f"  [INVALID] {f}: {reason}")
@@ -297,9 +308,14 @@ def main(args: argparse.Namespace) -> None:
         }, f, indent=2, ensure_ascii=False)
 
     print(f"\n[SUCCESS] Saved {len(results)} video representations to: {output_dir}")
-    print(f"  - Embeddings (binary): {pt_path}")
-    print(f"  - Metadata (JSON):     {meta_path}")
+    print(f"  - split_key used      : {args.split_key}")
+    print(f"  - Embeddings (binary) : {pt_path}")
+    print(f"  - Metadata (JSON)     : {meta_path}")
     print(f"  - First video: {results[0]['folder_name']}")
+    if args.split_key != "test":
+        print(f"  [REMINDER] split_key='{args.split_key}' — dùng --output_dir RIÊNG cho split này "
+              f"(khác với thư mục dùng cho 'test'), vì cả 2 đều lưu cùng tên file "
+              f"'video_representations.pt' — dùng chung dir sẽ bị GHI ĐÈ lẫn nhau.")
 
 
 # ==========================================
@@ -327,6 +343,13 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Thư mục output: sẽ tạo video_representations.pt + video_representations_meta.json."
+    )
+    parser.add_argument(
+        "--split_key",
+        type=str,
+        default="test",
+        help="Key trong split_file để lấy danh sách video ('test' mặc định, hoặc 'val' khi cần "
+             "tính representation cho tập val để sweep hyperparameter mà không tune trên test)."
     )
     parser.add_argument(
         "--embedding_model_name",

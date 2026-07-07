@@ -81,11 +81,17 @@ def evidence_lean(n_pos: int, n_total: int):
     return 1 if n_pos > n_neg else 0
 
 
-def load_test_videos(data_root: Path, split_file: Path) -> list:
+def load_split_ids(split_file: Path, key: str) -> set:
+    """Trả về set video_id thuộc 1 split (dùng để loại trừ khỏi candidate khi tuning trên val)."""
     with open(split_file, 'r') as f:
-        test_folders = json.load(f).get("test", [])
+        return set(json.load(f).get(key, []))
+
+
+def load_test_videos(data_root: Path, split_file: Path, split_key: str = "test") -> list:
+    with open(split_file, 'r') as f:
+        folders = json.load(f).get(split_key, [])
     valid = []
-    for folder in test_folders:
+    for folder in folders:
         emb_path = data_root / folder / "scene_embeddings.pt"
         seg_path = data_root / folder / "segments.json"
         if emb_path.exists() and seg_path.exists():
@@ -101,12 +107,18 @@ def evaluate_content(args: argparse.Namespace) -> None:
     data_root = Path(args.data_root)
     video_reps_dir = Path(args.video_reps_dir)
 
-    collection_name = args.content_collection_name or os.getenv("MILVUS_CONTENT_COLLECTION_NAME")
-    if not all([CLUSTER_ENDPOINT, TOKEN]):
-        raise ValueError("Missing MILVUS_CLUSTER_ENDPOINT/MILVUS_TOKEN.")
+    collection_name = args.content_collection_name or os.getenv("MILVUS_COLLECTION_NAME")
+    if not all([CLUSTER_ENDPOINT, TOKEN, collection_name]):
+        raise ValueError("Missing MILVUS_CLUSTER_ENDPOINT/MILVUS_TOKEN/collection name.")
 
     reps = torch.load(video_reps_dir / "video_representations.pt", map_location="cpu")
-    test_folders = load_test_videos(data_root, Path(args.split_file))
+    test_folders = load_test_videos(data_root, Path(args.split_file), args.split_key)
+
+    exclude_ids = set()
+    if args.exclude_split_key:
+        exclude_ids = load_split_ids(Path(args.split_file), args.exclude_split_key)
+        print(f"[INFO] Excluding {len(exclude_ids)} videos from split '{args.exclude_split_key}' "
+              f"from the candidate pool (clean holdout for tuning).")
 
     client = MilvusClient(uri=CLUSTER_ENDPOINT, token=TOKEN)
     correct, total, no_evidence = 0, 0, 0
@@ -131,6 +143,8 @@ def evaluate_content(args: argparse.Namespace) -> None:
         for hits in res:
             for hit in hits:
                 vid = hit["entity"]["video_id"]
+                if vid == folder or vid in exclude_ids:
+                    continue
                 score = hit["distance"]
                 if vid not in best_per_video or score > best_per_video[vid][0]:
                     best_per_video[vid] = (score, hit["entity"]["video_label"])
@@ -145,8 +159,8 @@ def evaluate_content(args: argparse.Namespace) -> None:
 
     client.close()
     print("=" * 60)
-    print(f" CONTENT-LEAN ACCURACY  (video_reps_dir={video_reps_dir.name}, "
-          f"top_k={args.top_k}, search_limit={args.search_limit})")
+    print(f" CONTENT-LEAN ACCURACY  (split={args.split_key}, video_reps_dir={video_reps_dir.name}, "
+          f"top_k={args.top_k}, search_limit={args.search_limit}, exclude={args.exclude_split_key or 'none'})")
     print("=" * 60)
     print(f" Videos evaluated : {total} (no representation: {no_evidence})")
     print(f" Accuracy         : {correct}/{total} = {correct/total:.4f}" if total else " No valid videos.")
@@ -245,7 +259,14 @@ def evaluate_edge(args: argparse.Namespace) -> None:
         with open(prior_path, 'r', encoding='utf-8') as f:
             prior_scores = json.load(f)
 
-    test_folders = load_test_videos(data_root, Path(args.split_file))
+    test_folders = load_test_videos(data_root, Path(args.split_file), args.split_key)
+
+    exclude_ids = set()
+    if args.exclude_split_key:
+        exclude_ids = load_split_ids(Path(args.split_file), args.exclude_split_key)
+        print(f"[INFO] Excluding {len(exclude_ids)} videos from split '{args.exclude_split_key}' "
+              f"from the candidate pool (clean holdout for tuning).")
+
     client = MilvusClient(uri=CLUSTER_ENDPOINT, token=TOKEN)
     correct, total, no_evidence = 0, 0, 0
 
@@ -270,7 +291,7 @@ def evaluate_edge(args: argparse.Namespace) -> None:
             hits = search_edge(client, edge_collection_name, qe["vector"], qe["rst_type"], args.candidate_limit)
             for h in hits:
                 vid = h["entity"]["video_id"]
-                if vid == folder:
+                if vid == folder or vid in exclude_ids:
                     continue
                 rst_type = h["entity"]["rst_type"]
                 prior = prior_scores.get(rst_type, 0.5)
@@ -317,11 +338,20 @@ if __name__ == "__main__":
     p_content = subparsers.add_parser("content", help="Evaluate Content Similarity lean accuracy.")
     p_content.add_argument("--data_root", type=str, required=True)
     p_content.add_argument("--split_file", type=str, required=True)
-    p_content.add_argument("--content_collection_name", type=str, required=True)
+    p_content.add_argument("--content_collection_name", type=str, default=None,
+                           help="Milvus collection cho Content Similarity. Mặc định env MILVUS_COLLECTION_NAME.")
     p_content.add_argument("--video_reps_dir", type=str, required=True)
     p_content.add_argument("--top_k", type=int, default=5)
     p_content.add_argument("--search_limit", type=int, default=50,
-                           help="Số scene thô lấy trước khi dedupe theo video (nên >> top_k).")
+                           help="Số scene thô lấy trước khi dedupe theo video (nên >> top_k, "
+                                "và cần LỚN HƠN khi dùng --exclude_split_key vì 1 phần candidate sẽ bị loại bỏ).")
+    p_content.add_argument("--exclude_split_key", type=str, default=None,
+                           help="Loại bỏ mọi candidate thuộc split này khỏi kết quả (ví dụ 'val') — "
+                                "dùng khi đang sweep bằng query=val để mô phỏng index chỉ gồm train, "
+                                "tránh val 'giúp' val. Để trống khi chạy thật trên test.")
+    p_content.add_argument("--split_key", type=str, default="test",
+                           help="Key trong split_file để lấy danh sách video ('test' hoặc 'val'). "
+                                "Dùng 'val' khi đang sweep hyperparameter để tránh tune trực tiếp trên tập test.")
 
     p_edge = subparsers.add_parser("edge", help="Evaluate Dense Edge Retrieval lean accuracy.")
     p_edge.add_argument("--data_root", type=str, required=True)
@@ -334,6 +364,13 @@ if __name__ == "__main__":
     p_edge.add_argument("--candidate_limit", type=int, default=50)
     p_edge.add_argument("--depth_penalty_weight", type=float, default=0.0,
                         help="Trọng số phạt lệch vị trí trong mạch truyện. 0.0 = tắt (mặc định).")
+    p_edge.add_argument("--exclude_split_key", type=str, default=None,
+                        help="Loại bỏ mọi candidate thuộc split này khỏi kết quả (ví dụ 'val') — "
+                             "dùng khi đang sweep bằng query=val để mô phỏng index chỉ gồm train. "
+                             "Để trống khi chạy thật trên test.")
+    p_edge.add_argument("--split_key", type=str, default="test",
+                        help="Key trong split_file để lấy danh sách video ('test' hoặc 'val'). "
+                             "Dùng 'val' khi đang sweep hyperparameter để tránh tune trực tiếp trên tập test.")
 
     args = parser.parse_args()
     if args.mode == "content":
