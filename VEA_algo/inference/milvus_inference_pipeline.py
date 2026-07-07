@@ -1,34 +1,5 @@
 """
 milvus_inference_pipeline.py
-------------------------------------------------------------------------
-Thay đổi so với v2:
-
-1. [FIX] CONTENT SIMILARITY — trước đây lấy top-K theo SCENE, không dedupe
-   theo video -> 1 video có nhiều scene giống nhau chiếm hết slot, biến
-   "K phiếu độc lập" thành phiếu nhân bản giả. Giờ search 1 pool lớn hơn
-   (--content_search_limit), dedupe theo video_id (giữ hit điểm cao nhất
-   mỗi video), rồi mới lấy top --content_top_k VIDEO khác nhau — cùng
-   logic dedupe mà Dense Edge Retrieval đã dùng từ đầu.
-
-2. [NEUTRAL PROMPT] Bỏ các rule cứng nhắc theo nhãn/kênh cụ thể (vốn được
-   suy ra từ đúng 1 lần đo trên 1 test set, dễ overfit theo seed/split):
-     - Bỏ "mặc định Low Engagement nếu không chắc" -> thay bằng yêu cầu
-       trung lập: cả 2 nhãn đều cần bằng chứng cụ thể như nhau.
-     - Bỏ "ưu tiên Narrative khi 2 nguồn mâu thuẫn" -> thay bằng rule dựa
-       trên CONFIDENCE nội tại (strong/weak) của từng nguồn tại thời điểm
-       chạy, không phải một thứ hạng cố định giữa 2 kênh.
-     - Bỏ câu diễn giải "diversity thấp thường là Low Engagement" -> chỉ
-       còn số liệu thô (X/Y relation types), để LLM tự đọc, không mớm nhãn.
-
-3. [HYPERPARAMETERS] Expose qua CLI thay vì hard-code, để sweep dễ dàng:
-     --content_top_k, --content_search_limit  (kênh Content Similarity)
-     --sim_weight, --prior_weight              (kênh Dense Edge Retrieval)
-     --depth_penalty_weight (mặc định 0.0 = tắt; bật thử nghiệm phạt theo
-       độ lệch vị trí trong mạch truyện, xem ghi chú ở compute_scene_depths)
-
-4. [ENSEMBLE] Tie-break trong compute_ensemble_label giờ dựa trên
-   confidence (strong > weak) của mỗi lean, không còn ưu tiên cứng
-   "narrative luôn thắng" — ổn định hơn qua các lần chạy/seed khác nhau.
 """
 
 import os
@@ -141,25 +112,20 @@ CALIBRATION_NOTE = (
     "either direction."
 )
 
-CONTENT_PATTERN_NOTES = (
-    "Patterns observed across labeled videos (use as heuristics, not strict rules):\n"
-    "- High Engagement often builds toward one specific, concrete payoff — a question "
-    "resolving into a clear answer, a warning resolving into an explained consequence, a "
-    "setup resolving into a reveal. Vague or generic content without such a payoff is a "
-    "weaker signal, even if the scenes are visually well-connected.\n"
-    "- High Engagement can also come from a distinctive personality, humor, or a specific, "
-    "pointed opinion/claim — even when the scene-to-scene structure doesn't follow a classic "
-    "arc. Do not penalize a video just for lacking a tidy narrative arc if it has a strong, "
-    "specific hook of this kind (e.g., a bold claim, a recognizable personality, a comedic "
-    "turn).\n"
-    "- A well-connected, logically coherent sequence of scenes is NOT by itself evidence of "
-    "High Engagement — competent-but-generic content (routine performances, standard product/"
-    "retail displays, common recurring content formats) can be perfectly coherent and still "
-    "unremarkable. Ask whether the content itself is distinctive, not just whether the scenes "
-    "connect logically.\n"
-    "- Low Engagement often shows abrupt topic jumps that don't build toward anything, or "
-    "claims that stay broad and undeveloped rather than getting more specific."
-)
+CONTENT_PATTERN_NOTES = """
+### CORE DISTINCTION CRITERIA
+
+To accurately separate High-Engagement (Label 1) from Low-Engagement (Label 0), evaluate the structural progression of the captions across these 4 dimensions:
+
+| Dimension | High Engagement (Label 1) | Low Engagement (Label 0) |
+| :--- | :--- | :--- |
+| **1. Hook & Topic Focus** | Introduces a clear, specific favorite item, central claim, or a unique process immediately in the opening scenes. | Has a flat, generic, or slow introduction with no clear central subject or purpose established early on. |
+| **2. Narrative Progression** | The sequence of scenes shows a clear purpose, logical cause-effect, or a structured build-up (e.g., presenting a choice, step-by-step creation, or transformation). | The sequence is static, repetitive, or unorganized, simply piling up scenes without any clear logical development or climax. |
+| **3. Content Specificity** | Elaborates with high-sensory details, unique flavor profiles, surprising contrasts, or strong reactions/outcomes later in the sequence. | Remains shallow or uniformly vague throughout; lacks detailed elaboration, unique selling points, or definitive outcomes. |
+| **4. Structural Dynamics** | Creates a complete meaningful loop (e.g., establishing a plan -> execution -> reaction, or setting a boundary -> conflict -> resolution). | Feels incomplete, randomly cut off, or disjointed, failing to connect the opening premise to a satisfying conclusion. |
+
+*Note: Since you are reading textual captions, do not penalize a video just because its scenes describe daily or routine tasks. Instead, look closely at whether those tasks are organized into a purposeful, high-progression sequence (Label 1) or remain a flat, directionless compilation (Label 0).*
+"""
 
 
 def build_system_prompt(evidence_mode: str) -> str:
@@ -583,16 +549,30 @@ def build_reasoning_example(evidence_mode: str) -> str:
 
 
 def build_reasoning_guidelines(evidence_mode: str) -> str:
+    primary_filter = (
+        "1. **BALANCED CONTENT EVALUATION**: Carefully analyze the input video's structural progression "
+        "and logical flow based on the captions. Evaluate whether the scenes are organized with a clear focus, "
+        "a purposeful sequence, or rich sensory details (as defined in the Core Distinction Criteria). "
+        "Do not automatically default to Label 0 just because the text describes everyday or routine actions; "
+        "instead, judge whether those actions build toward a meaningful progression or outcome."
+    )
+
     if evidence_mode == "none":
-        return """1. Read the video content carefully. Does it have a clear hook, build-up, and satisfying arc?
-2. Base your decision solely on the input video's own content and structure — no external reference library is available in this setting.
-3. Be specific: mention scene numbers and explain what works or doesn't.
-4. Write your explanation in plain language. No system names, no technical jargon."""
-    return """1. Read the video content first. Does it have a clear hook, build-up, and satisfying arc?
-2. Use the references as supporting evidence — not as the primary basis.
-3. When a reference block is weak/mixed (low agreement) or absent, rely more on the video content itself.
-4. Be specific: mention scene numbers and explain what works or doesn't.
-5. Write your explanation in plain language. No system names, no technical jargon."""
+        return (
+            f"{primary_filter}\n"
+            "2. **FINAL DECISION**: Synthesize your observations across all four core dimensions with equal "
+            "probability. Base your final label and plain-language explanation strictly on this objective structural analysis."
+        )
+    
+    return (
+        f"{primary_filter}\n"
+        "2. **REFERENCE CROSS-EXAMINATION**: Examine the provided reference examples as contextual anchors. "
+        "Look for similarities in structural dynamics, theme progression, or reaction patterns to help calibrate "
+        "your judgment, especially for borderline cases.\n"
+        "3. **INTEGRATED JUDGMENT**: Combine your independent content analysis with the evidence from the references. "
+        "If the reference library shows a strong consensus (agreement: strong), give that structural signal "
+        "significant weight in your final prediction."
+    )
 
 
 def build_llm_prompt(video_context_text, content_similarity_text, narrative_pattern_text, evidence_mode) -> str:
@@ -951,7 +931,7 @@ def main(args: argparse.Namespace) -> None:
                 sample_data['y'].item() if isinstance(sample_data['y'], torch.Tensor) else sample_data['y']
             )
 
-            status = "✓" if ground_truth == final_prediction else "✗"
+            status = "✓" if ground_truth == pred_label else "✗"
             preview_parts = []
             if content_hits_record:
                 preview_parts.append(f"content={content_lean}({content_conf})")
@@ -959,7 +939,7 @@ def main(args: argparse.Namespace) -> None:
                 preview_parts.append(f"narrative={narrative_lean}({narrative_conf})")
             preview_parts.append(f"llm={pred_label}")
             preview_parts.append(f"final={final_prediction}")
-            print(f"| GT={ground_truth} {status} | tokens={n_tokens:,} | " + " | ".join(preview_parts))
+            print(f"| GT={ground_truth} llm={pred_label} {status} | tokens={n_tokens:,} | " + " | ".join(preview_parts))
 
             evaluation_results.append({
                 "folder_name":              folder,
