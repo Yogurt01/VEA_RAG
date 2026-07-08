@@ -1,5 +1,44 @@
 """
-milvus_inference_pipeline.py
+milvus_inference_pipeline.py  (v4 — Discourse Path Serialization + Nuclearity-Weighted re-ranking)
+--------------------------------------------------------------------------------------------------
+Thay thế kênh "Dense Edge Retrieval" (v3) bằng kênh mới dựa trên đặc tả kỹ thuật
+người dùng cung cấp: Discourse Path Serialization (DPS) + Nuclearity-Weighted RAG.
+
+LƯU Ý HỌC THUẬT (đọc trước khi trích dẫn trong khoá luận): tên gọi "Discourse Path
+Serialization"/"Nuclearity-Weighted RAG" và công thức trong đặc tả KHÔNG khớp với
+bất kỳ paper đã công bố nào tìm được — đây nhiều khả năng là phương pháp tự đề xuất
+bởi 1 phiên làm việc AI khác, không phải trích từ paper. Các nghiên cứu THẬT gần nhất
+cùng hướng (RST-tree cho RAG) là Disco-RAG (arXiv:2601.04377) và "Discourse-Aware RAG
+via Rhetorical Structure Modeling" (OpenReview) — nhưng cơ chế khác (RST nội-đoạn +
+rhetorical graph liên-đoạn, không phải serialize đường đi về gốc). Khi viết khoá luận,
+nên trình bày đây là phương pháp tự đề xuất lấy cảm hứng từ hướng RST-aware RAG, không
+gán cho 1 bài báo cụ thể.
+
+Khác biệt so với v3:
+    - Kênh 'edge' (giữ nguyên tên mode để không phá vỡ quy ước ablation/checkpoint đã có)
+      giờ hoạt động theo 2 chặng:
+        Chặng 1 (Dense Vector Search): với MỖI SCENE của video test, search trực tiếp
+        trên collection scene-level ĐÃ CÓ SẴN (dùng chung với kênh Content Similarity,
+        KHÔNG cần build thêm Milvus collection nào mới).
+        Chặng 2 (Topology/Nuclearity Re-ranking): với mỗi video ứng viên, tính vector
+        đặc trưng cấu trúc (phân phối loại quan hệ RST) từ rst_links gốc, so cosine với
+        video test, kết hợp điểm: final = alpha*dense_sim + (1-alpha)*topology_sim.
+    - Caption hiển thị cho LLM (cả video test lẫn evidence) giờ được "tuyến tính hóa"
+      (DPS): mỗi caption được chú thích thêm quan hệ diễn ngôn dẫn về scene gốc (ROOT).
+    - KHÔNG còn cần --edge_index_dir / --edge_collection_name / rst_edge_index collection
+      / sim_weight / prior_weight / depth_penalty_weight — thay bằng --alpha,
+      --discourse_top_k, --discourse_search_limit.
+    - CONTENT_PATTERN_NOTES, CALIBRATION_NOTE, CONFLICT_RESOLUTION_NOTE giữ nguyên
+      (đã được người dùng tinh chỉnh ở phiên bản trước, không liên quan tới cơ chế
+      retrieval bên trong nên không cần đổi).
+
+Usage: gần như giống v3, chỉ đổi nhóm tham số cho kênh 'edge':
+    python milvus_inference_pipeline.py --evidence_mode edge \
+        --data_root .../All_Videos --split_file .../dataset_splits.json \
+        --checkpoint_path .../ablation_edge_v4.json \
+        --content_collection_name video_scenes_collection \
+        --alpha 0.7 --discourse_top_k 5 --discourse_search_limit 30 \
+        --model_name .../Qwen3-4B-Instruct-2507
 """
 
 import os
@@ -55,6 +94,14 @@ RST_DESCRIPTIONS = {
     'ATTRIBUTION':          'attributed to',
 }
 
+# Thứ tự CỐ ĐỊNH — dùng làm chiều cho topology vector (Nuclearity Scoring),
+# đảm bảo mọi video (test lẫn training) đều so sánh trên đúng cùng 1 hệ trục.
+CANONICAL_RST_TYPES = tuple(sorted(RST_DESCRIPTIONS.keys()))
+
+# Dùng cho Tension Score T = |E_dynamic| / (|E_total| + eps)
+DYNAMIC_RST_TYPES = {"TEMPORAL", "CONTRAST", "CAUSE"}
+STATIC_RST_TYPES  = {"ELABORATION", "JOINT"}
+
 
 def rst_to_natural(rst_type: str) -> str:
     return RST_DESCRIPTIONS.get(rst_type.upper(), rst_type.lower().replace('_', ' '))
@@ -86,14 +133,17 @@ REFERENCE_SOURCE_DOCS = {
    - The similarity score reflects overall content alignment.
    - Each block reports its own internal agreement (strong / weak / mixed — how consistently
      the matched videos point to one label). Treat "weak" or "mixed" as low-confidence.""",
-    "edge": """2. NARRATIVE TRANSITION REFERENCE:
-   - These results come from matching individual scene-to-scene transitions of the input video
-     against a library of transitions from other (distinct) videos, using content similarity.
-   - Each match shows a reference video with a similar transition and its known engagement outcome.
-   - The "Match strength" score (0–1) indicates how similar the matched transition is.
-   - "Narrative relation diversity" reports how many distinct discourse relations
-     (e.g., contrast, elaboration, temporal) the video's own scene transitions use — read this
-     alongside the video content itself; it is descriptive, not a rule for either label.
+    "edge": """2. DISCOURSE PATTERN REFERENCE:
+   - These results come from matching individual scenes of the input video against a library
+     of scenes from other (distinct) videos, using BOTH content similarity AND discourse
+     structure similarity (how the relation types — contrast, elaboration, temporal, etc. —
+     are distributed across the video's own scene graph).
+   - Each match reports a "Blended score" combining dense content similarity and structural
+     (topology) similarity, plus the reference video's own "Tension" (how much its narrative
+     relies on dynamic relations like contrast/cause/temporal vs. static ones like elaboration/joint).
+   - Captions shown (both for the input video and the references) are annotated with their
+     discourse path back to the video's core/opening scene — read this as descriptive context,
+     not as a rule for either label.
    - This block also reports its own internal agreement (strong / weak / mixed). Treat "weak"
      or "mixed" as low-confidence.""",
 }
@@ -194,9 +244,8 @@ def evidence_lean_and_confidence(n_pos: int, n_total: int):
 
 def dedupe_content_hits_by_video(search_results, top_k: int) -> list:
     """
-    [FIX] Search trả về hit theo SCENE — dedupe theo video_id (giữ hit điểm
-    cao nhất mỗi video) trước khi lấy top_k, để mỗi video chỉ đóng góp
-    ĐÚNG 1 phiếu, tránh 1 video có nhiều scene giống nhau chiếm hết top-K.
+    Search trả về hit theo SCENE — dedupe theo video_id (giữ hit điểm cao nhất
+    mỗi video) trước khi lấy top_k, để mỗi video chỉ đóng góp ĐÚNG 1 phiếu.
     """
     best_per_video = {}
     for hits in search_results:
@@ -246,30 +295,8 @@ def build_content_similarity_context(top_hits: list) -> tuple:
 
 
 # ==========================================
-# 6. DENSE EDGE RETRIEVAL — Milvus
+# 6. DISCOURSE PATH SERIALIZATION (DPS)
 # ==========================================
-
-EDGE_OUTPUT_FIELDS = [
-    "video_id", "video_label", "rst_type", "src_caption", "tgt_caption",
-    "src_scene_id", "tgt_scene_id", "depth_src", "depth_tgt",
-]
-
-
-def load_prior_scores(edge_index_dir: Path) -> dict:
-    prior_path = edge_index_dir / "prior_scores.json"
-    if not prior_path.exists():
-        print(f"[WARN] {prior_path} not found, using flat 0.5 prior for all rst_types.")
-        return {}
-    with open(prior_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def load_video_representations(video_reps_dir: Path) -> dict:
-    pt_path = video_reps_dir / "video_representations.pt"
-    if not pt_path.exists():
-        raise FileNotFoundError(f"{pt_path} not found. Run milvus_compute_video_query.py first.")
-    return torch.load(pt_path, map_location="cpu")
-
 
 def load_captions_by_index(segments, scene_ids_list, max_len: int = 990):
     def _get(idx: int, scene_id_int: int) -> str:
@@ -284,13 +311,12 @@ def load_captions_by_index(segments, scene_ids_list, max_len: int = 990):
     return [_get(i, int(sid)) for i, sid in enumerate(scene_ids_list)]
 
 
-def compute_scene_depths(rst_links: list, n_scenes: int) -> list:
+def build_discourse_adjacency(rst_links: list, n_scenes: int) -> tuple:
     """
-    BFS-lite depth (khoảng cách tới node ROOT/scene mở đầu) — dùng CHỈ khi
-    --depth_penalty_weight > 0. Mặc định TẮT (0.0), không ảnh hưởng hành vi
-    gốc trừ khi người dùng chủ động bật để thử nghiệm.
+    Xây đồ thị VÔ HƯỚNG {node: [(neighbor, relation), ...]} từ rst_links, và
+    xác định root_node (scene gắn với quan hệ ROOT, mặc định scene 0 nếu không có).
     """
-    adj = collections.defaultdict(set)
+    adj = collections.defaultdict(list)
     root_candidates = set()
     for link in rst_links:
         try:
@@ -298,206 +324,248 @@ def compute_scene_depths(rst_links: list, n_scenes: int) -> list:
             s, t = int(src) - 1, int(tgt) - 1
         except Exception:
             continue
-        if 0 <= s < n_scenes and 0 <= t < n_scenes:
-            adj[s].add(t)
-            adj[t].add(s)
-            if normalize_rst_type(rst_type) == "ROOT":
-                root_candidates.add(t)
-                root_candidates.add(s)
-    anchor = next(iter(root_candidates)) if root_candidates else 0
-    depth = [-1] * n_scenes
-    if n_scenes == 0:
-        return depth
-    depth[anchor] = 0
-    queue = collections.deque([anchor])
+        if not (0 <= s < n_scenes and 0 <= t < n_scenes):
+            continue
+        rst_norm = normalize_rst_type(rst_type)
+        adj[s].append((t, rst_norm))
+        adj[t].append((s, rst_norm))
+        if rst_norm == "ROOT":
+            root_candidates.add(s)
+            root_candidates.add(t)
+    root_node = next(iter(root_candidates)) if root_candidates else 0
+    return adj, root_node
+
+
+def find_path_to_root(adj: dict, start: int, root: int) -> list:
+    """
+    BFS parent-pointer thuần Python (không dùng networkx, nhất quán với phần
+    còn lại của file) — trả về list (from_scene, relation, to_scene) theo
+    đúng thứ tự từ `start` đến `root`. Rỗng nếu start==root hoặc không tới được
+    (đồ thị rời rạc).
+    """
+    if start == root:
+        return []
+    visited = {start}
+    parent = {}
+    queue = collections.deque([start])
     while queue:
         u = queue.popleft()
-        for v in adj[u]:
-            if depth[v] == -1:
-                depth[v] = depth[u] + 1
+        if u == root:
+            break
+        for v, rel in adj.get(u, []):
+            if v not in visited:
+                visited.add(v)
+                parent[v] = (u, rel)
                 queue.append(v)
-    return depth
+    if root not in visited and root != start:
+        return []
+    chain = []
+    node = root
+    while node != start:
+        if node not in parent:
+            return []
+        prev, rel = parent[node]
+        chain.append((prev, rel, node))
+        node = prev
+    chain.reverse()
+    return chain
 
 
-def build_query_edges(embeddings_norm: torch.Tensor, rst_links: list, captions: list, depths: list) -> list:
-    n_scenes = embeddings_norm.shape[0]
-    queries = []
+def serialize_discourse_captions(captions: list, rst_links: list, n_scenes: int) -> list:
+    """
+    DPS: với mỗi scene, chú thích caption gốc bằng quan hệ diễn ngôn dẫn về
+    scene gốc (ROOT) của video — chỉ lấy BƯỚC ĐẦU TIÊN của đường đi để tránh
+    caption quá dài với cây sâu, vẫn giữ tinh thần "chú thích ngữ cảnh phân cấp".
+    """
+    adj, root_node = build_discourse_adjacency(rst_links, n_scenes)
+    serialized = []
+    for i in range(n_scenes):
+        base = captions[i] if i < len(captions) else ""
+        chain = find_path_to_root(adj, i, root_node)
+        if not chain:
+            serialized.append(base)
+            continue
+        _, rel, to_scene = chain[0]
+        rel_natural = rst_to_natural(rel)
+        if len(chain) == 1:
+            annotation = f" [Discourse: {rel_natural} the video's core scene (Scene {to_scene})]"
+        else:
+            annotation = f" [Discourse: {rel_natural} Scene {to_scene}, eventually leading to the video's core scene]"
+        serialized.append(base + annotation)
+    return serialized
+
+
+def compute_topology_vector(rst_links: list) -> list:
+    """Vector tần suất (đã chuẩn hóa L1) theo CANONICAL_RST_TYPES — Nuclearity Scoring."""
+    counts = Counter()
     for link in rst_links:
         try:
-            raw_src, raw_tgt, raw_rst = link[0], link[1], link[2]
-            s_idx, t_idx = int(raw_src) - 1, int(raw_tgt) - 1
+            counts[normalize_rst_type(link[2])] += 1
         except Exception:
             continue
-        if not (0 <= s_idx < n_scenes and 0 <= t_idx < n_scenes):
-            continue
-        rst_norm = normalize_rst_type(raw_rst)
-        vec = torch.cat([embeddings_norm[s_idx], embeddings_norm[t_idx]], dim=0).tolist()
-        queries.append({
-            "vector":      vec,
-            "rst_type":    rst_norm,
-            "src_caption": captions[s_idx] if s_idx < len(captions) else "",
-            "tgt_caption": captions[t_idx] if t_idx < len(captions) else "",
-            "depth_src":   depths[s_idx] if s_idx < len(depths) else -1,
-            "depth_tgt":   depths[t_idx] if t_idx < len(depths) else -1,
-        })
-    return queries
+    total = sum(counts.get(t, 0) for t in CANONICAL_RST_TYPES)
+    if total == 0:
+        return [0.0] * len(CANONICAL_RST_TYPES)
+    return [counts.get(t, 0) / total for t in CANONICAL_RST_TYPES]
 
 
-def search_edge(milvus_client, edge_collection_name: str, query_vec: list, rst_type: str, limit: int):
-    try:
-        hits = milvus_client.search(
-            collection_name=edge_collection_name, data=[query_vec],
-            filter=f'rst_type == "{rst_type}"', limit=limit,
-            output_fields=EDGE_OUTPUT_FIELDS,
-        )[0]
-    except Exception:
-        hits = []
-    if not hits:
+def compute_tension_score(rst_links: list) -> float:
+    """T = |E_dynamic| / (|E_total| + eps) — CHỈ mang tính mô tả, không mớm nhãn."""
+    total = 0
+    dynamic = 0
+    for link in rst_links:
         try:
-            hits = milvus_client.search(
-                collection_name=edge_collection_name, data=[query_vec],
-                limit=limit, output_fields=EDGE_OUTPUT_FIELDS,
-            )[0]
+            rst_type = normalize_rst_type(link[2])
         except Exception:
-            hits = []
-    return hits
+            continue
+        total += 1
+        if rst_type in DYNAMIC_RST_TYPES:
+            dynamic += 1
+    return dynamic / (total + 1e-6)
 
 
-def score_edge_hit(hit: dict, prior_scores: dict, sim_weight: float, prior_weight: float,
-                    query_depth_src: int, depth_penalty_weight: float) -> float:
-    cos_sim  = float(hit["distance"])
-    rst_type = hit["entity"]["rst_type"]
-    prior    = prior_scores.get(rst_type, 0.5)
-    score = sim_weight * cos_sim + prior_weight * prior
-
-    if depth_penalty_weight > 0 and query_depth_src >= 0:
-        hit_depth_src = hit["entity"].get("depth_src", -1)
-        if hit_depth_src >= 0:
-            penalty = depth_penalty_weight * min(abs(query_depth_src - hit_depth_src), 3) / 3
-            score -= penalty
-    return score
+def cosine_sim(v1: list, v2: list) -> float:
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = sum(a * a for a in v1) ** 0.5
+    norm2 = sum(b * b for b in v2) ** 0.5
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot / (norm1 * norm2)
 
 
-def retrieve_narrative_evidence(
-    embeddings_norm: torch.Tensor, rst_links: list, captions: list, depths: list,
-    current_video_id: str, milvus_client, edge_collection_name: str,
-    prior_scores: dict, data_root: Path, top_k: int, candidate_limit: int,
-    sim_weight: float, prior_weight: float, depth_penalty_weight: float,
-) -> tuple:
-    query_edges = build_query_edges(embeddings_norm, rst_links, captions, depths)
-    if not query_edges:
-        return query_edges, []
-
-    best_per_video = {}
-    for qe in query_edges:
-        hits = search_edge(milvus_client, edge_collection_name, qe["vector"], qe["rst_type"], candidate_limit)
-        for h in hits:
-            vid = h["entity"]["video_id"]
-            if vid == current_video_id:
-                continue
-            score = score_edge_hit(h, prior_scores, sim_weight, prior_weight,
-                                    qe["depth_src"], depth_penalty_weight)
-            if vid not in best_per_video or score > best_per_video[vid]["score"]:
-                best_per_video[vid] = {
-                    "score":        score,
-                    "video_label":  h["entity"]["video_label"],
-                    "rst_type":     h["entity"]["rst_type"],
-                    "src_caption":  h["entity"]["src_caption"],
-                    "tgt_caption":  h["entity"]["tgt_caption"],
-                    "src_scene_id": h["entity"]["src_scene_id"],
-                    "tgt_scene_id": h["entity"]["tgt_scene_id"],
-                }
-
-    ranked = sorted(best_per_video.items(), key=lambda kv: kv[1]["score"], reverse=True)
-    return query_edges, ranked[:top_k]
-
-
-def get_local_subgraph_context(video_id: str, src_scene_id: int, tgt_scene_id: int,
-                                 data_root: Path, max_neighbors: int = 2) -> str:
+def load_candidate_video_data(video_id: str, data_root: Path, cache: dict) -> dict:
+    """
+    Load (và cache trong 1 lần gọi retrieve) rst_links/caption DPS/topology vector/
+    tension score của 1 video training — dùng cho Chặng 2 (Topology Re-ranking).
+    """
+    if video_id in cache:
+        return cache[video_id]
     try:
         emb_path = data_root / video_id / "scene_embeddings.pt"
         seg_path = data_root / video_id / "segments.json"
-        pt_data  = torch.load(emb_path, map_location="cpu")
+        pt_data = torch.load(emb_path, map_location="cpu")
         scene_ids_list = [int(x) for x in pt_data["scene_ids"]]
         rst_links = pt_data.get("rst_links", [])
         with open(seg_path, 'r', encoding='utf-8') as f:
             segments = json.load(f)
-        captions = load_captions_by_index(segments, scene_ids_list)
-
-        try:
-            s_idx = scene_ids_list.index(src_scene_id)
-            t_idx = scene_ids_list.index(tgt_scene_id)
-        except ValueError:
-            return ""
-
-        neighbor_idxs = set()
-        for link in rst_links:
-            try:
-                a, b = int(link[0]) - 1, int(link[1]) - 1
-            except Exception:
-                continue
-            if a in (s_idx, t_idx) and b not in (s_idx, t_idx):
-                neighbor_idxs.add(b)
-            if b in (s_idx, t_idx) and a not in (s_idx, t_idx):
-                neighbor_idxs.add(a)
-
-        neighbor_idxs = list(neighbor_idxs)[:max_neighbors]
-        if not neighbor_idxs:
-            return ""
-        lines = [f"     Nearby context: {captions[i][:150]}" for i in neighbor_idxs if i < len(captions)]
-        return "\n".join(lines)
+        raw_captions = load_captions_by_index(segments, scene_ids_list)
+        dps_captions = serialize_discourse_captions(raw_captions, rst_links, len(scene_ids_list))
+        data = {
+            "scene_ids":       scene_ids_list,
+            "dps_captions":    dps_captions,
+            "topology_vector": compute_topology_vector(rst_links),
+            "tension_score":   compute_tension_score(rst_links),
+        }
     except Exception:
-        return ""
+        data = None
+    cache[video_id] = data
+    return data
+
+
+DISCOURSE_OUTPUT_FIELDS = ["scene_uid", "video_id", "video_label", "caption"]
+
+
+def retrieve_discourse_evidence(
+    embeddings_norm: torch.Tensor, rst_links: list, captions: list,
+    current_video_id: str, milvus_client, collection_name: str, data_root: Path,
+    top_k: int, search_limit: int, alpha: float,
+) -> tuple:
+    """
+    Chặng 1 (Dense Vector Search): với MỖI SCENE của video test, search trên
+    collection scene-level đã có sẵn (DÙNG CHUNG với kênh Content Similarity).
+    Chặng 2 (Topology/Nuclearity Re-ranking): blend dense similarity với
+    cosine similarity giữa topology vector của video test và video ứng viên.
+
+    Trả về (query_dps_captions, ranked_top) — ranked_top: list[(video_id, cand_dict)]
+    đã dedupe theo video, sort giảm dần theo final blended score.
+    """
+    n_scenes = embeddings_norm.shape[0]
+    query_dps_captions = serialize_discourse_captions(captions, rst_links, n_scenes)
+    query_topology = compute_topology_vector(rst_links)
+
+    if n_scenes == 0:
+        return query_dps_captions, []
+
+    video_cache = {}
+    best_per_video = {}
+
+    for scene_idx in range(n_scenes):
+        query_vec = embeddings_norm[scene_idx].tolist()
+        try:
+            res = milvus_client.search(
+                collection_name=collection_name,
+                data=[query_vec],
+                limit=search_limit,
+                output_fields=DISCOURSE_OUTPUT_FIELDS,
+            )
+        except Exception:
+            res = []
+
+        hits = res[0] if res else []
+        for h in hits:
+            vid = h["entity"]["video_id"]
+            if vid == current_video_id:
+                continue
+            cand_data = load_candidate_video_data(vid, data_root, video_cache)
+            if cand_data is None:
+                continue
+
+            dense_sim = float(h["distance"])
+            topo_sim = cosine_sim(query_topology, cand_data["topology_vector"])
+            final_score = alpha * dense_sim + (1 - alpha) * topo_sim
+
+            if vid not in best_per_video or final_score > best_per_video[vid]["score"]:
+                s_uid = h["entity"].get("scene_uid", "")
+                matched_caption = h["entity"].get("caption", "")
+                try:
+                    matched_scene_id = int(s_uid.rsplit("_", 1)[-1])
+                    matched_idx = cand_data["scene_ids"].index(matched_scene_id)
+                    matched_caption = cand_data["dps_captions"][matched_idx]
+                except Exception:
+                    pass
+
+                best_per_video[vid] = {
+                    "score":           final_score,
+                    "dense_sim":       dense_sim,
+                    "topology_sim":    topo_sim,
+                    "video_label":     h["entity"]["video_label"],
+                    "matched_caption": matched_caption,
+                    "tension_score":   cand_data["tension_score"],
+                }
+
+    ranked = sorted(best_per_video.items(), key=lambda kv: kv[1]["score"], reverse=True)
+    return query_dps_captions, ranked[:top_k]
 
 
 # ==========================================
-# 7. CONTEXT BUILDER — NARRATIVE PATTERNS (không mớm nhãn)
+# 7. CONTEXT BUILDER — DISCOURSE PATTERNS (không mớm nhãn)
 # ==========================================
 
-def build_narrative_pattern_context(query_edges: list, ranked_top: list, data_root: Path) -> tuple:
+def build_discourse_context(query_dps_captions: list, query_tension: float, ranked_top: list) -> tuple:
     """Trả về (context_text, lean, confidence)."""
-    lines = []
-
-    if query_edges:
-        distinct = len(set(qe['rst_type'] for qe in query_edges))
-        total    = len(query_edges)
-        diversity = distinct / total if total else 0.0
-        lines.append(f"Narrative relation diversity: {distinct}/{total} distinct relation types used ({diversity:.0%}).")
-    else:
-        lines.append("Narrative relation diversity: no RST relations extracted.")
-    lines.append("")
-
-    if query_edges:
-        parts = []
-        for qe in query_edges[:10]:
-            src_short = qe['src_caption'][:40] + '...' if len(qe['src_caption']) > 40 else qe['src_caption']
-            tgt_short = qe['tgt_caption'][:40] + '...' if len(qe['tgt_caption']) > 40 else qe['tgt_caption']
-            parts.append(f'"{src_short}" → ({rst_to_natural(qe["rst_type"])}) → "{tgt_short}"')
-        lines.append("Input video transition sequence:")
-        lines.append("  " + "  |  ".join(parts))
-    else:
-        lines.append("Input video transition sequence: none extracted.")
-    lines.append("")
+    lines = [
+        f"Input video narrative tension (dynamic/total relations): {query_tension:.2f} "
+        f"(higher = more temporal/contrast/cause-driven pacing; purely descriptive).",
+        "",
+    ]
 
     if not ranked_top:
-        lines.append("No matching transition patterns found in the reference library.")
+        lines.append("No matching discourse patterns found in the reference library.")
         return "\n".join(lines), None, "none"
-
-    lines.append(f"Top {len(ranked_top)} matching transition patterns from reference library:")
-    lines.append("")
 
     n_eng = sum(1 for _, c in ranked_top if c['video_label'] == 1)
     lean, confidence = evidence_lean_and_confidence(n_eng, len(ranked_top))
 
+    lines.append(f"Top {len(ranked_top)} matching discourse patterns from reference library:")
+    lines.append("")
     for rank, (vid, cand) in enumerate(ranked_top, 1):
         outcome = "HIGH ENGAGEMENT" if cand['video_label'] == 1 else "LOW ENGAGEMENT"
-        lines.append(f"[{rank}] Reference pattern ({rst_to_natural(cand['rst_type'])}):")
-        lines.append(f"     Outcome: {outcome}  |  Match strength: {cand['score']:.4f}")
-        lines.append(f'     "{cand["src_caption"][:150]}"')
-        lines.append(f'     "{cand["tgt_caption"][:150]}"')
-        ctx = get_local_subgraph_context(vid, cand['src_scene_id'], cand['tgt_scene_id'], data_root)
-        if ctx:
-            lines.append(ctx)
+        lines.append(
+            f"[{rank}] Outcome: {outcome}  |  Blended score: {cand['score']:.4f} "
+            f"(dense={cand['dense_sim']:.3f}, topology={cand['topology_sim']:.3f})  "
+            f"|  Reference tension: {cand['tension_score']:.2f}"
+        )
+        lines.append(f'     "{cand["matched_caption"][:220]}"')
         lines.append("")
 
     n_neng = len(ranked_top) - n_eng
@@ -519,13 +587,13 @@ def build_reasoning_example(evidence_mode: str) -> str:
         bullets.append("- Content similarity: label distribution across 5 distinct reference videos is 4×Label 1, 1×Label 0. [agreement: strong]")
     if evidence_mode in ("edge", "full"):
         bullets.append(
-            '- Narrative transitions: label distribution across 5 distinct reference videos is 3×Label 0, 2×Label 1. [agreement: weak]\n'
-            '  Top pattern: "Product reveal close-up" → (contrasts with) → "Casual low-energy reaction" '
-            '| LOW ENGAGEMENT | Match strength: 0.81'
+            '- Discourse pattern: label distribution across 5 distinct reference videos is 3×Label 0, 2×Label 1. [agreement: weak]\n'
+            '  Top match: Blended score 0.81 (dense=0.85, topology=0.70) | LOW ENGAGEMENT | Reference tension: 0.65\n'
+            '  "A close-up product reveal [Discourse: elaborates on Scene 2, eventually leading to the video\'s core scene]"'
         )
-        bullets.append("- Narrative relation diversity: 2/9 transitions (22%).")
+        bullets.append("- Input video narrative tension: 0.22 (mostly static/elaboration-driven pacing).")
     if evidence_mode == "full":
-        bullets.append("- The two sources disagree; content shows 'strong' agreement while narrative shows only "
+        bullets.append("- The two sources disagree; content shows 'strong' agreement while discourse pattern shows only "
                         "'weak' agreement, so content gets more weight here per the confidence-based rule — but "
                         "the video's own content is still the primary basis for the final call.")
     if not bullets:
@@ -582,7 +650,7 @@ def build_llm_prompt(video_context_text, content_similarity_text, narrative_patt
         sections.append(f"=== {n}. CONTENT SIMILARITY REFERENCE ===\n{content_similarity_text}")
         n += 1
     if narrative_pattern_text is not None:
-        sections.append(f"=== {n}. NARRATIVE TRANSITION REFERENCE ===\n{narrative_pattern_text}")
+        sections.append(f"=== {n}. DISCOURSE PATTERN REFERENCE ===\n{narrative_pattern_text}")
         n += 1
 
     sections.append(f"=== {n}. REASONING EXAMPLE ===\n{build_reasoning_example(evidence_mode)}")
@@ -607,8 +675,7 @@ def compute_ensemble_label(llm_pred, content_lean, content_conf, narrative_lean,
     """
     Vote đa số giữa 3 tín hiệu. Tie-break dựa trên CONFIDENCE nội tại của
     từng lean (ưu tiên lean có confidence 'strong'), KHÔNG ưu tiên cố định
-    1 kênh cụ thể — để ổn định hơn qua các seed/split khác nhau, vì kênh
-    nào mạnh hơn có thể đổi theo dữ liệu chứ không phải hằng số.
+    1 kênh cụ thể.
     """
     votes = [v for v in [llm_pred, content_lean, narrative_lean] if v in (0, 1)]
     if not votes:
@@ -648,6 +715,7 @@ MILVUS_OUTPUT_FIELDS = ["scene_uid", "video_id", "video_label", "caption"]
 # ==========================================
 
 def generate_input_video_context(folder_name: str, data: dict, data_root: Path) -> str:
+    """Hiển thị caption của video test — giờ đi qua DPS (chú thích đường đi diễn ngôn về scene gốc)."""
     seg_path       = data_root / folder_name / "segments.json"
     scene_ids_list = data['scene_ids']
     captions_dict  = {}
@@ -668,14 +736,24 @@ def generate_input_video_context(folder_name: str, data: dict, data_root: Path) 
     except Exception:
         pass
 
-    lines = [f"Total scenes: {len(scene_ids_list)}", ""]
-    for scene_id in scene_ids_list[:20]:
-        s_id_int = int(scene_id)
-        cap = captions_dict.get(s_id_int, "No caption available.")
-        cap = cap[:130] + '...' if len(cap) > 130 else cap
-        lines.append(f'  Scene {s_id_int}: "{cap}"')
+    n_scenes = len(scene_ids_list)
+    raw_caption_list = [captions_dict.get(int(sid), "No caption available.") for sid in scene_ids_list]
+    dps_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
+
+    lines = [f"Total scenes: {n_scenes}", ""]
+    for idx, scene_id in enumerate(scene_ids_list[:20]):
+        cap = dps_captions[idx] if idx < len(dps_captions) else "No caption available."
+        cap = cap[:200] + '...' if len(cap) > 200 else cap
+        lines.append(f'  Scene {int(scene_id)}: "{cap}"')
 
     return "\n".join(lines)
+
+
+def load_video_representations(video_reps_dir: Path) -> dict:
+    pt_path = video_reps_dir / "video_representations.pt"
+    if not pt_path.exists():
+        raise FileNotFoundError(f"{pt_path} not found. Run milvus_compute_video_query.py first.")
+    return torch.load(pt_path, map_location="cpu")
 
 
 def load_valid_videos(data_root: Path, split_file: Path, reps_by_folder: dict, require_reps: bool) -> tuple:
@@ -779,11 +857,9 @@ def main(args: argparse.Namespace) -> None:
     need_content = evidence_mode in ("content", "full")
     need_edge    = evidence_mode in ("edge", "full")
 
-    milvus_client         = None
-    collection_name       = None
-    edge_collection_name  = None
-    reps_by_folder        = {}
-    prior_scores          = {}
+    milvus_client    = None
+    collection_name  = None
+    reps_by_folder   = {}
 
     if need_content or need_edge:
         milvus_endpoint = os.getenv("MILVUS_CLUSTER_ENDPOINT")
@@ -792,32 +868,27 @@ def main(args: argparse.Namespace) -> None:
             raise ValueError("Missing MILVUS_CLUSTER_ENDPOINT / MILVUS_TOKEN env vars.")
         milvus_client = MilvusClient(uri=milvus_endpoint, token=milvus_token)
 
-    if need_content:
+        # Cả 2 kênh giờ dùng CHUNG 1 collection scene-level — không cần rst_edge_index nữa.
         collection_name = args.content_collection_name or os.getenv("MILVUS_COLLECTION_NAME")
         if not collection_name:
-            raise ValueError("Missing collection name: pass --content_collection_name or set MILVUS_COLLECTION_NAME env var (required for evidence_mode='content'/'full').")
+            raise ValueError(
+                "Missing collection name: pass --content_collection_name or set "
+                "MILVUS_COLLECTION_NAME env var (required for evidence_mode='content'/'edge'/'full')."
+            )
+
+    if need_content:
         if not args.video_reps_dir:
             raise ValueError("--video_reps_dir is required when evidence_mode is 'content' or 'full'.")
         reps_by_folder = load_video_representations(Path(args.video_reps_dir))
         print(f"[INFO] Loaded {len(reps_by_folder)} video representations from {args.video_reps_dir}.")
 
-    if need_edge:
-        edge_collection_name = args.edge_collection_name or os.getenv("MILVUS_EDGE_COLLECTION_NAME", "rst_edge_index")
-        if not milvus_client.has_collection(edge_collection_name):
-            raise RuntimeError(f"Collection '{edge_collection_name}' not found. Run milvus_build_edge_index.py first.")
-        if not args.edge_index_dir:
-            raise ValueError("--edge_index_dir is required when evidence_mode is 'edge' or 'full'.")
-        prior_scores = load_prior_scores(Path(args.edge_index_dir))
-        print(f"[INFO] Loaded {len(prior_scores)} rst_type priors from {args.edge_index_dir}.")
-
     print(f"[INFO] evidence_mode = '{evidence_mode}' "
-          f"(content={'ON' if need_content else 'off'}, edge={'ON' if need_edge else 'off'})")
+          f"(content={'ON' if need_content else 'off'}, edge/discourse={'ON' if need_edge else 'off'})")
     if need_content:
         print(f"[INFO] content hyperparams: top_k={args.content_top_k}, search_limit={args.content_search_limit}")
     if need_edge:
-        print(f"[INFO] edge hyperparams: sim_weight={args.sim_weight}, prior_weight={args.prior_weight}, "
-              f"top_k_evidence={args.top_k_evidence}, candidate_limit={args.candidate_limit}, "
-              f"depth_penalty_weight={args.depth_penalty_weight}")
+        print(f"[INFO] discourse hyperparams: alpha={args.alpha}, top_k={args.discourse_top_k}, "
+              f"search_limit={args.discourse_search_limit}")
     print()
 
     print(f"[INFO] Loading Qwen3-4B-Instruct from: {args.model_name}")
@@ -882,19 +953,16 @@ def main(args: argparse.Namespace) -> None:
             narrative_lean = narrative_conf = None
             if need_edge:
                 embeddings_norm = F.normalize(sample_data['embeddings'].float(), p=2, dim=1)
-                depths = compute_scene_depths(sample_data.get('rst_links', []), embeddings_norm.shape[0]) \
-                    if args.depth_penalty_weight > 0 else [-1] * embeddings_norm.shape[0]
-                query_edges, ranked_top = retrieve_narrative_evidence(
-                    embeddings_norm, sample_data.get('rst_links', []), captions, depths,
+                query_dps_captions, ranked_top = retrieve_discourse_evidence(
+                    embeddings_norm, sample_data.get('rst_links', []), captions,
                     current_video_id=folder,
-                    milvus_client=milvus_client, edge_collection_name=edge_collection_name,
-                    prior_scores=prior_scores, data_root=data_root,
-                    top_k=args.top_k_evidence, candidate_limit=args.candidate_limit,
-                    sim_weight=args.sim_weight, prior_weight=args.prior_weight,
-                    depth_penalty_weight=args.depth_penalty_weight,
+                    milvus_client=milvus_client, collection_name=collection_name, data_root=data_root,
+                    top_k=args.discourse_top_k, search_limit=args.discourse_search_limit,
+                    alpha=args.alpha,
                 )
-                narrative_pattern_text, narrative_lean, narrative_conf = build_narrative_pattern_context(
-                    query_edges, ranked_top, data_root,
+                query_tension = compute_tension_score(sample_data.get('rst_links', []))
+                narrative_pattern_text, narrative_lean, narrative_conf = build_discourse_context(
+                    query_dps_captions, query_tension, ranked_top,
                 )
                 narrative_hits_record = [{"video_id": vid, **cand} for vid, cand in ranked_top]
 
@@ -910,7 +978,7 @@ def main(args: argparse.Namespace) -> None:
                 if narrative_pattern_text is not None:
                     messages[1]["content"] = build_llm_prompt(
                         video_context_text, content_similarity_text,
-                        "Narrative pattern context truncated — prompt exceeded context window.",
+                        "Discourse pattern context truncated — prompt exceeded context window.",
                         evidence_mode,
                     )
                 elif content_similarity_text is not None:
@@ -936,7 +1004,7 @@ def main(args: argparse.Namespace) -> None:
             if content_hits_record:
                 preview_parts.append(f"content={content_lean}({content_conf})")
             if narrative_hits_record:
-                preview_parts.append(f"narrative={narrative_lean}({narrative_conf})")
+                preview_parts.append(f"discourse={narrative_lean}({narrative_conf})")
             preview_parts.append(f"llm={pred_label}")
             preview_parts.append(f"final={final_prediction}")
             print(f"| GT={ground_truth} llm={pred_label} {status} | tokens={n_tokens:,} | " + " | ".join(preview_parts))
@@ -1006,8 +1074,8 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="VideoRAG Inference Pipeline v3 — dedupe fix for content channel, neutral prompt, "
-                    "exposed hyperparameters for sweeping.",
+        description="VideoRAG Inference Pipeline — Content Similarity + Discourse Path Serialization "
+                    "(DPS) / Nuclearity-weighted re-ranking (thay Dense Edge Retrieval).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--data_root",         type=str, required=True)
@@ -1015,10 +1083,10 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path",   type=str, required=True)
     parser.add_argument("--evidence_mode",     type=str, default="full", choices=EVIDENCE_MODE_CHOICES)
     parser.add_argument("--content_collection_name", type=str, default=None,
-                        help="Milvus collection cho Content Similarity. Mặc định env MILVUS_CONTENT_COLLECTION_NAME.")
-    parser.add_argument("--video_reps_dir",    type=str, default=None)
-    parser.add_argument("--edge_index_dir",    type=str, default=None)
-    parser.add_argument("--edge_collection_name", type=str, default=None)
+                        help="Milvus collection scene-level DÙNG CHUNG cho cả 2 kênh (content và edge/discourse). "
+                             "Mặc định env MILVUS_COLLECTION_NAME.")
+    parser.add_argument("--video_reps_dir",    type=str, default=None,
+                        help="Dir chứa video_representations.pt. CHỈ cần khi evidence_mode ∈ {content, full}.")
     parser.add_argument("--model_name",        type=str, default=DEFAULT_MODEL_NAME)
 
     # --- Content Similarity hyperparameters ---
@@ -1027,17 +1095,13 @@ if __name__ == "__main__":
     parser.add_argument("--content_search_limit", type=int, default=50,
                         help="Số scene thô lấy từ Milvus trước khi dedupe theo video (nên >> content_top_k).")
 
-    # --- Dense Edge Retrieval hyperparameters ---
-    parser.add_argument("--top_k_evidence", type=int, default=5,
-                        help="Số VIDEO khác nhau (đã dedupe) lấy làm evidence cho kênh Narrative Transition.")
-    parser.add_argument("--candidate_limit", type=int, default=50,
-                        help="Số candidate lấy từ Milvus MỖI query edge (ANN search).")
-    parser.add_argument("--sim_weight", type=float, default=0.85,
-                        help="Trọng số cosine similarity trong công thức chấm điểm edge.")
-    parser.add_argument("--prior_weight", type=float, default=0.15,
-                        help="Trọng số prior theo rst_type trong công thức chấm điểm edge.")
-    parser.add_argument("--depth_penalty_weight", type=float, default=0.0,
-                        help="Trọng số phạt lệch vị trí trong mạch truyện (DDE-lite). 0.0 = tắt (mặc định).")
+    # --- Discourse Path Serialization / Nuclearity-weighted hyperparameters ---
+    parser.add_argument("--discourse_top_k", type=int, default=5,
+                        help="Số VIDEO khác nhau (đã dedupe) lấy làm evidence cho kênh Discourse Pattern.")
+    parser.add_argument("--discourse_search_limit", type=int, default=30,
+                        help="Số candidate lấy từ Milvus MỖI scene của video test (ANN search).")
+    parser.add_argument("--alpha", type=float, default=0.7,
+                        help="Trọng số blend: final = alpha*dense_sim + (1-alpha)*topology_sim. Mặc định 0.7.")
 
     args = parser.parse_args()
     main(args)
