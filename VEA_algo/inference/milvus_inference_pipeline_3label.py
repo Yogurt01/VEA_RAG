@@ -91,26 +91,21 @@ def rst_to_natural(rst_type: str) -> str:
 
 LABEL_DEFINITIONS = {
     0: (
-        "Low Engaging (Not engaging) — A flat, descriptive walkthrough (e.g., a spec sheet, "
-        "static teardown, feature list, or side-by-side comparison) with NO opening hook, NO "
-        "demonstration-with-suspense, NO audience-directed language, and NO narrative closure. "
-        "Scenes simply enumerate components, specs, or facts one after another without ever "
-        "building toward a point — this holds true even when the technical detail is rich."
+        "Low Engaging (Not engaging) — A passive, text-heavy or spec-focused walkthrough. "
+        "Typically consists of pointing at static components, listing physical specifications, "
+        "or documenting repair/retail steps. Even if captions use structural words like 'establishing context' "
+        "or 'elaborating on features', if the core action is just passive observation of an object, it is Label 0."
     ),
     1: (
-        "Neutral — The video has some narrative or personal color (a mild setup, a low-stakes "
-        "task, or descriptive elaboration with commentary/opinion) but is missing at least one "
-        "of the three things that make a video land: a real demonstration-with-suspense, an "
-        "audience-engagement signal, or a clean resolution. It often stays purely descriptive "
-        "despite added color, juggles multiple threads that never converge, or ends abruptly "
-        "without paying off its own setup."
+        "Neutral — A standard, competent presentation with a human element (e.g., a host speaking in a studio, "
+        "someone unboxing items linearly, a quiet travel vlog, or a simple multi-person interaction). "
+        "It has a logical flow and clear subject, but it is unexciting: it lacks high-stakes testing, "
+        "unexpected plot twists, or strong audience-retention triggers."
     ),
     2: (
-        "High Engaging (Engaging) — The video opens with a real hook or stakes (a question, a "
-        "claim, a promise relevant to the viewer), demonstrates that claim in action with some "
-        "suspense (a test, a before/after, a live reaction, success-after-initial-failure), "
-        "actively engages the audience (direct address, call-to-action, visible reactions or "
-        "social proof), AND closes with a clear resolution that pays off the opening hook."
+        "High Engaging (Engaging) — The video features active retention triggers: a bold/philosophical opening hook, "
+        "celebrity/pop-culture anchors, dynamic movement between completely different physical locations (e.g., studio to outdoor rain), "
+        "live stress-testing of a feature (including capturing a failure and retrying), or energetic host-to-camera interaction."
     ),
 }
 
@@ -166,25 +161,33 @@ CALIBRATION_NOTE = (
 
 
 CONTENT_PATTERN_NOTES = """
-### CORE DISTINCTION CRITERIA
+# CORE DISTINCTION CRITERIA
 
-To accurately separate High Engaging (Label 2), Neutral (Label 1), and Low Engaging /
-Not Engaging (Label 0), check the captions against these 4 dimensions. A video does not
-need to hit every High-Engaging box to earn Label 2, but it should show most of them —
-and a video missing ALL of them, however detailed, is Label 0.
+## FINAL LABELING RULE:
+*   Label 2: Requires High Engaging indicators in the majority of the dimensions.
+*   Label 1: Applies when engagement triggers are weak, incidental, or present in only a few scenes.
+*   Label 0: Mandatory if the video fails to show any High Engaging indicators, regardless of how long or detailed the transcript is.
 
-| Dimension | High Engaging (Label 2) | Neutral (Label 1) | Low Engaging (Label 0) |
-| :--- | :--- | :--- | :--- |
-| **1. Opening Hook & Stakes** | Opens with a pointed question, a bold claim, or a promise that creates real curiosity or personal relevance for the viewer ("why should you care"). | Opens with a clear topic or setting, but with no real tension or stakes — a plain "here's what this is" introduction. | Opens with a flat product/technical intro (name, appearance, category) with zero audience-directed language. |
-| **2. Demonstration & Suspense** ("show, don't just tell") | Contains at least one scene where a claim/feature is put to the test in real time with a suspenseful or surprising outcome (attempt → partial failure → success; a clear before/after; a live reaction). | Contains a task or human action/conflict, but it is low-stakes, resolved instantly with no tension, or left dangling without payoff. | Never demonstrates anything happening — only narrates or points at static components, specs, or side-by-side comparisons. |
-| **3. Audience Engagement Signals** | Includes direct address to the viewer, an explicit call-to-action, or visible social proof (reactions, smiles, group participation, registrations, applause). | People or reactions may appear, but incidentally — not directed at persuading or involving the audience. | No audience-directed language at all; all attention stays on the object/device itself. |
-| **4. Narrative Closure (Payoff)** | Ends by tying back to the opening hook with a concrete resolution — the question is answered, the product is justified, the conflict is resolved, the argument is concluded. | Ends abruptly, ambiguously, or with an unresolved thread; multiple narrative threads may never converge (common in longer videos that keep introducing new sub-scenes without ever landing one of them). | Ends simply because the last spec/feature was listed — there was never a narrative to close in the first place. |
+## DIMENSION 1: OPENING HOOK & STAKES
+*   Low Engaging (Label 0): Opens with a flat product or technical introduction (stating the name, appearance, or category) with zero audience-directed language.
+*   Neutral (Label 1): Opens with a clear topic, introduction, or setting, but contains no real tension, curiosity, or stakes — it is a plain "here is what this video is about" introduction.
+*   High Engaging (Label 2): Opens with a pointed question, a bold claim, or a strong promise that immediately creates real curiosity or personal relevance for the viewer ("why you should care").
 
-*Reminder: scene count is NOT a reliable signal — long videos (15-20 scenes) show up at every
-label, and short videos (3-5 scenes) can be Low, Neutral, or High. Judge structure, not length.
-Product/review videos are not automatically Low, and personal/narrative videos are not
-automatically High — the same "unboxing" format can land at any of the 3 labels depending on
-whether it demonstrates, engages, and closes, or just describes.*
+## DIMENSION 2: DEMONSTRATION & SUSPENSE ("Show, don't just tell")
+*   Low Engaging (Label 0): Never demonstrates anything actively happening. The script only narrates, points at static components, lists specifications, or makes side-by-side text comparisons.
+*   Neutral (Label 1): Contains a task, human action, or minor conflict, but it is low-stakes, resolved instantly with no real tension, or left dangling without any meaningful payoff.
+*   High Engaging (Label 2): Contains at least one scene where a claim or feature is put to the test in real time with a suspenseful or surprising outcome (such as: attempt → partial failure → success; a clear before/after transformation; or a raw live reaction).
+
+## DIMENSION 3: AUDIENCE ENGAGEMENT SIGNALS
+*   Low Engaging (Label 0): No audience-directed language at all. All attention and commentary stay strictly focused on the object, device, or technical topic itself.
+*   Neutral (Label 1): People or reactions may appear in the video, but they do so incidentally — the host is not actively directing the speech to persuade, involve, or connect with the audience.
+*   High Engaging (Label 2): Includes direct address to the viewer (using personal pronouns like "you"), an explicit call-to-action, or visible social proof (reactions, smiles, group participation, registrations, applause).
+
+### DIMENSION 4: NARRATIVE CLOSURE (PAYOFF)
+*   Low Engaging (Label 0): Ends simply because the last specification or feature on the list was reached. There was never a narrative thread or storyline to close in the first place.
+*   Neutral (Label 1): Ends abruptly, ambiguously, or with an unresolved thread. Multiple sub-scenes may have been introduced throughout the video but they never converge to a unified conclusion.
+*   High Engaging (Label 2): Ends by tying clean back to the opening hook with a concrete resolution — the initial question is answered, the product usage is justified, the conflict is resolved, or the core argument is definitively concluded.
+
 """
 
 
@@ -213,9 +216,6 @@ and provide a final engagement prediction.
 Label definitions:
 {_label_def_lines}
 IMPORTANT: Only three labels exist — 0 (Low Engaging), 1 (Neutral), and 2 (High Engaging).
-Label 1 (Neutral) is a genuine, legitimate outcome — use it whenever the evidence points to
-a video that is neither clearly high engaging nor clearly low engaging. Do not force every
-borderline case into 0 or 2.
 
 {CONTENT_PATTERN_NOTES}
 
@@ -605,6 +605,8 @@ def build_reasoning_example(evidence_mode: str) -> str:
 
 [Expected output]:
 {{
+  "step_1_reference_check": "Majority is 2 with strong agreement (4xLabel 2, 1xLabel 1).",
+  "step_2_retention_trigger_check": "Yes. Scene 2 features an explicit bold product reveal with dynamic host interaction.",
   "predicted_label": "2",
   "explanation": "Scene 2 delivers a clear, specific hook (the reveal itself), and the reference videos with a similar pattern and strong agreement were mostly High Engaging. The transition sequence builds toward that reveal rather than repeating itself.",
   "improvement_suggestions": [
@@ -652,12 +654,14 @@ def build_llm_prompt(video_context_text, content_similarity_text, narrative_patt
         sections.append(f"=== {n}. DISCOURSE PATTERN REFERENCE ===\n{narrative_pattern_text}")
         n += 1
 
-    sections.append(f"=== {n}. REASONING EXAMPLE ===\n{build_reasoning_example(evidence_mode)}")
+    # sections.append(f"=== {n}. REASONING EXAMPLE ===\n{build_reasoning_example(evidence_mode)}")
     sections.append(f"=== REASONING GUIDELINES ===\n{build_reasoning_guidelines(evidence_mode)}")
-    sections.append(f"""Respond ONLY with a JSON object, no text outside the braces:
+    sections.append(f"""Respond ONLY with a JSON object, no text outside the braces. You MUST strictly follow the step-by-step verification inside the JSON layout:
 {{
+  "step_1_reference_check": "State the majority label inside the CONTENT SIMILARITY REFERENCE and its agreement level (e.g., 'Majority is 0 with strong agreement'). If no references exist, state 'None'.",
+  "step_2_retention_trigger_check": "Scan the input captions. Is there any explicit high-energy hook, celebrity anchor, unexpected device failure/retry, or dynamic switch between different locations? (Yes/No and briefly list them. If none, write 'None').",
   "predicted_label": "{_valid_labels_str}",
-  "explanation": "A plain-language review. Mention specific scenes. No system names or scores.",
+  "explanation": "A plain-language review explaining the alignment between the references and the video's actual action flow. Mention specific scenes. No system names or scores.",
   "improvement_suggestions": [
     "Actionable suggestion 1.",
     "Actionable suggestion 2."
