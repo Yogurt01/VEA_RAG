@@ -1,17 +1,8 @@
 """
-milvus_inference_pipeline.py  (v5 — 3-class engagement: Low Engaging / Neutral / High Engaging)
+milvus_inference_pipeline_3label.py
 --------------------------------------------------------------------------------------------------
-Kế thừa toàn bộ kiến trúc v4 (Content Similarity retrieval + Discourse Path Serialization +
-Nuclearity-Weighted topology re-ranking), chỉ thay đổi phần liên quan tới NHÃN:
-    - LABEL_DEFINITIONS / LABEL_SHORT: 0 = Low Engaging (Not engaging), 1 = Neutral,
-      2 = High Engaging (Engaging).
-    - evidence_lean_and_confidence(): tổng quát hóa từ 2 lớp sang N lớp (đa số phiếu +
-      biên độ chênh lệch giữa top1/top2), dùng chung cho cả 2 kênh evidence.
-    - compute_ensemble_label(): vote đa số trên tập nhãn {0, 1, 2} thay vì {0, 1}.
-    - CONTENT_PATTERN_NOTES: bảng tiêu chí phân biệt mở rộng thêm cột Neutral.
-
 Usage: 
-    python milvus_inference_pipeline.py --evidence_mode edge \
+    python milvus_inference_pipeline_3label.py --evidence_mode edge \
         --data_root .../All_Videos --split_file .../dataset_splits.json \
         --checkpoint_path .../ablation_edge.json \
         --content_collection_name video_scenes_collection \
@@ -86,7 +77,7 @@ CANONICAL_RST_TYPES = [
     "CAUSE", 
     "BACKGROUND", 
     "COMPARISON", 
-    "EVALUATION"
+    "MANNER_MEANS"
 ]
 
 
@@ -99,9 +90,28 @@ def rst_to_natural(rst_type: str) -> str:
 # ==========================================
 
 LABEL_DEFINITIONS = {
-    0: "Low Engaging (Not engaging) — The video fails to attract or retain viewers; narrative flow is weak, generic, or incoherent.",
-    1: "Neutral — The video has some engaging elements but overall neither strongly attracts nor repels viewer attention; pacing/structure is partial or inconsistent.",
-    2: "High Engaging (Engaging) — The video effectively utilises multimodal elements and discourse structure to attract and retain viewers.",
+    0: (
+        "Low Engaging (Not engaging) — A flat, descriptive walkthrough (e.g., a spec sheet, "
+        "static teardown, feature list, or side-by-side comparison) with NO opening hook, NO "
+        "demonstration-with-suspense, NO audience-directed language, and NO narrative closure. "
+        "Scenes simply enumerate components, specs, or facts one after another without ever "
+        "building toward a point — this holds true even when the technical detail is rich."
+    ),
+    1: (
+        "Neutral — The video has some narrative or personal color (a mild setup, a low-stakes "
+        "task, or descriptive elaboration with commentary/opinion) but is missing at least one "
+        "of the three things that make a video land: a real demonstration-with-suspense, an "
+        "audience-engagement signal, or a clean resolution. It often stays purely descriptive "
+        "despite added color, juggles multiple threads that never converge, or ends abruptly "
+        "without paying off its own setup."
+    ),
+    2: (
+        "High Engaging (Engaging) — The video opens with a real hook or stakes (a question, a "
+        "claim, a promise relevant to the viewer), demonstrates that claim in action with some "
+        "suspense (a test, a before/after, a live reaction, success-after-initial-failure), "
+        "actively engages the audience (direct address, call-to-action, visible reactions or "
+        "social proof), AND closes with a clear resolution that pays off the opening hook."
+    ),
 }
 
 # Nhãn ngắn gọn dùng để in trong evidence blocks (content similarity / discourse pattern).
@@ -144,27 +154,37 @@ CONFLICT_RESOLUTION_NOTE = (
 
 CALIBRATION_NOTE = (
     "- Judge the video on its own specific merits. Low Engaging, Neutral, and High Engaging "
-    "are all equally valid default-free outcomes — each requires you to point to a concrete, "
-    "identifiable reason in the video (or in the references) rather than an assumption in "
-    "any direction. Do not treat Neutral as a fallback for 'uncertain'; only assign it when "
-    "the evidence itself describes a genuinely middling video."
+    "are all equally valid, equally common outcomes — do not treat Label 0 as a harsh verdict "
+    "to avoid, or Label 1 as a safe 'unsure' default. Point to a concrete reason from the Core "
+    "Distinction Criteria below for whichever label you choose.\n"
+    "- Two traps to actively avoid: (1) A video with rich technical detail or many scenes is "
+    "NOT automatically more engaging — a long, detailed spec list is still Label 0 if it never "
+    "builds a hook, demonstration, or resolution. (2) A video that merely CONTAINS a narrative "
+    "element (a task, a conflict, a journey) is not automatically Label 2 — check whether that "
+    "narrative actually resolves and actively engages the audience, or it stays Label 1."
 )
+
 
 CONTENT_PATTERN_NOTES = """
 ### CORE DISTINCTION CRITERIA
 
 To accurately separate High Engaging (Label 2), Neutral (Label 1), and Low Engaging /
-Not Engaging (Label 0), evaluate the structural progression of the captions across
-these 4 dimensions:
+Not Engaging (Label 0), check the captions against these 4 dimensions. A video does not
+need to hit every High-Engaging box to earn Label 2, but it should show most of them —
+and a video missing ALL of them, however detailed, is Label 0.
 
 | Dimension | High Engaging (Label 2) | Neutral (Label 1) | Low Engaging (Label 0) |
 | :--- | :--- | :--- | :--- |
-| **1. Hook & Topic Focus** | Introduces a clear, specific favorite item, central claim, or a unique process immediately in the opening scenes. | Has a recognizable subject or purpose, but it is introduced late, weakly, or without much specificity. | Has a flat, generic, or slow introduction with no clear central subject or purpose established early on. |
-| **2. Narrative Progression** | The sequence of scenes shows a clear purpose, logical cause-effect, or a structured build-up (e.g., presenting a choice, step-by-step creation, or transformation). | Shows some logical ordering or partial build-up, but it is inconsistent, loosely connected, or loses momentum midway. | The sequence is static, repetitive, or unorganized, simply piling up scenes without any clear logical development or climax. |
-| **3. Content Specificity** | Elaborates with high-sensory details, unique flavor profiles, surprising contrasts, or strong reactions/outcomes later in the sequence. | Provides some specific details or moments of interest, but they are sparse or unevenly distributed across the video. | Remains shallow or uniformly vague throughout; lacks detailed elaboration, unique selling points, or definitive outcomes. |
-| **4. Structural Dynamics** | Creates a complete meaningful loop (e.g., establishing a plan -> execution -> reaction, or setting a boundary -> conflict -> resolution). | Has a partial arc — a beginning and middle are present but the payoff/conclusion is weak, rushed, or only mildly satisfying. | Feels incomplete, randomly cut off, or disjointed, failing to connect the opening premise to a satisfying conclusion. |
+| **1. Opening Hook & Stakes** | Opens with a pointed question, a bold claim, or a promise that creates real curiosity or personal relevance for the viewer ("why should you care"). | Opens with a clear topic or setting, but with no real tension or stakes — a plain "here's what this is" introduction. | Opens with a flat product/technical intro (name, appearance, category) with zero audience-directed language. |
+| **2. Demonstration & Suspense** ("show, don't just tell") | Contains at least one scene where a claim/feature is put to the test in real time with a suspenseful or surprising outcome (attempt → partial failure → success; a clear before/after; a live reaction). | Contains a task or human action/conflict, but it is low-stakes, resolved instantly with no tension, or left dangling without payoff. | Never demonstrates anything happening — only narrates or points at static components, specs, or side-by-side comparisons. |
+| **3. Audience Engagement Signals** | Includes direct address to the viewer, an explicit call-to-action, or visible social proof (reactions, smiles, group participation, registrations, applause). | People or reactions may appear, but incidentally — not directed at persuading or involving the audience. | No audience-directed language at all; all attention stays on the object/device itself. |
+| **4. Narrative Closure (Payoff)** | Ends by tying back to the opening hook with a concrete resolution — the question is answered, the product is justified, the conflict is resolved, the argument is concluded. | Ends abruptly, ambiguously, or with an unresolved thread; multiple narrative threads may never converge (common in longer videos that keep introducing new sub-scenes without ever landing one of them). | Ends simply because the last spec/feature was listed — there was never a narrative to close in the first place. |
 
-*Note: Since you are reading textual captions, do not penalize a video just because its scenes describe daily or routine tasks. Instead, look closely at whether those tasks are organized into a purposeful, high-progression sequence (Label 2), a partially-organized but unremarkable sequence (Label 1, Neutral), or remain a flat, directionless compilation (Label 0). Reserve Label 1 (Neutral) for videos that genuinely sit in between — do not use it as a default "unsure" bucket; always point to a concrete reason the video is neither clearly high nor clearly low engaging.*
+*Reminder: scene count is NOT a reliable signal — long videos (15-20 scenes) show up at every
+label, and short videos (3-5 scenes) can be Low, Neutral, or High. Judge structure, not length.
+Product/review videos are not automatically Low, and personal/narrative videos are not
+automatically High — the same "unboxing" format can land at any of the 3 labels depending on
+whether it demonstrates, engages, and closes, or just describes.*
 """
 
 
