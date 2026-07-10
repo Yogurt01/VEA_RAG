@@ -90,23 +90,9 @@ def rst_to_natural(rst_type: str) -> str:
 # ==========================================
 
 LABEL_DEFINITIONS = {
-    0: (
-        "Low Engaging (Not engaging) — A passive, text-heavy or spec-focused walkthrough. "
-        "Typically consists of pointing at static components, listing physical specifications, "
-        "or documenting repair/retail steps. Even if captions use structural words like 'establishing context' "
-        "or 'elaborating on features', if the core action is just passive observation of an object, it is Label 0."
-    ),
-    1: (
-        "Neutral — A standard, competent presentation with a human element (e.g., a host speaking in a studio, "
-        "someone unboxing items linearly, a quiet travel vlog, or a simple multi-person interaction). "
-        "It has a logical flow and clear subject, but it is unexciting: it lacks high-stakes testing, "
-        "unexpected plot twists, or strong audience-retention triggers."
-    ),
-    2: (
-        "High Engaging (Engaging) — The video features active retention triggers: a bold/philosophical opening hook, "
-        "celebrity/pop-culture anchors, dynamic movement between completely different physical locations (e.g., studio to outdoor rain), "
-        "live stress-testing of a feature (including capturing a failure and retrying), or energetic host-to-camera interaction."
-    ),
+    0: "Label 0 (Low Engaging): Passive walkthrough, text-heavy, or spec-focused list. Merely observes static components with no audience connection.",
+    1: "Label 1 (Neutral): Standard presentation with a human element (studio host, linear unboxing, simple vlogs). Logical flow but lacks high-stakes testing or unexpected twists.",
+    2: "Label 2 (High Engaging): Active retention triggers present (bold opening hooks, real-time stress testing, dynamic location switches, strong viewer address)."
 }
 
 # Nhãn ngắn gọn dùng để in trong evidence blocks (content similarity / discourse pattern).
@@ -128,16 +114,8 @@ _valid_labels_set = set(LABEL_DEFINITIONS.keys())
 # ==========================================
 
 REFERENCE_SOURCE_DOCS = {
-    "content": """1. CONTENT SIMILARITY REFERENCE (PRIMARY SOURCE):
-   - These are the most visually and thematically similar REFERENCE VIDEOS found in the
-     library (deduplicated — each is a distinct video, not repeated scenes from the same video).
-   - This serves as your primary external baseline for evaluation, as it reflects solid thematic alignment.
-   - Each block reports its own internal agreement (strong / weak / mixed). Treat "weak" or "mixed" as low-confidence.""",
-    "edge": """2. DISCOURSE PATTERN REFERENCE (SECONDARY/SUPPLEMENTARY SOURCE):
-   - These results come from matching individual scenes of the input video against a library
-     of scenes using BOTH content similarity AND discourse structure similarity.
-   - This block is purely supplementary and should be used as secondary reference context 
-     rather than an equal decision-making signal to content similarity.""",
+    "content": "Historical cases with highly similar thematic content:",
+    "edge": "Historical cases with similar structural/discourse flows:"
 }
 
 CONFLICT_RESOLUTION_NOTE = (
@@ -161,33 +139,30 @@ CALIBRATION_NOTE = (
 
 
 CONTENT_PATTERN_NOTES = """
-# CORE DISTINCTION CRITERIA
+CRITICAL SCORING RULES:
+- Label 2: Requires High Engaging indicators in at least 3 out of 4 dimensions.
+- Label 1: Present in only 1 or 2 dimensions, or follows predictable Neutral patterns.
+- Label 0: Zero High Engaging indicators met. Length or text density does NOT prevent a Label 0.
 
-## FINAL LABELING RULE:
-*   Label 2: Requires High Engaging indicators in the majority of the dimensions.
-*   Label 1: Applies when engagement triggers are weak, incidental, or present in only a few scenes.
-*   Label 0: Mandatory if the video fails to show any High Engaging indicators, regardless of how long or detailed the transcript is.
+DIMENSION 1: OPENING HOOK & STAKES
+- Low (0): Flat product/technical intro with zero audience-directed language.
+- Neutral (1): Plain topic introduction with no real tension or stakes.
+- High (2): Pointed question or bold claim creating immediate curiosity ("why you should care").
 
-## DIMENSION 1: OPENING HOOK & STAKES
-*   Low Engaging (Label 0): Opens with a flat product or technical introduction (stating the name, appearance, or category) with zero audience-directed language.
-*   Neutral (Label 1): Opens with a clear topic, introduction, or setting, but contains no real tension, curiosity, or stakes — it is a plain "here is what this video is about" introduction.
-*   High Engaging (Label 2): Opens with a pointed question, a bold claim, or a strong promise that immediately creates real curiosity or personal relevance for the viewer ("why you should care").
+DIMENSION 2: DEMONSTRATION & SUSPENSE
+- Low (0): Static narration, spec lists, or side-by-side text comparisons without active action.
+- Neutral (1): Simple task or minor human action, resolved instantly with no real payoff.
+- High (2): Real-time stress-testing, surprise outcomes (attempt -> failure -> retry), or live reactions.
 
-## DIMENSION 2: DEMONSTRATION & SUSPENSE ("Show, don't just tell")
-*   Low Engaging (Label 0): Never demonstrates anything actively happening. The script only narrates, points at static components, lists specifications, or makes side-by-side text comparisons.
-*   Neutral (Label 1): Contains a task, human action, or minor conflict, but it is low-stakes, resolved instantly with no real tension, or left dangling without any meaningful payoff.
-*   High Engaging (Label 2): Contains at least one scene where a claim or feature is put to the test in real time with a suspenseful or surprising outcome (such as: attempt → partial failure → success; a clear before/after transformation; or a raw live reaction).
+DIMENSION 3: AUDIENCE ENGAGEMENT SIGNALS
+- Low (0): No audience-directed language. Strict focus on the object/device.
+- Neutral (1): Human appears incidentally, but does not actively persuade or connect with the viewer.
+- High (2): Direct address ("you"), explicit call-to-action, or visible social proof (applause, reactions).
 
-## DIMENSION 3: AUDIENCE ENGAGEMENT SIGNALS
-*   Low Engaging (Label 0): No audience-directed language at all. All attention and commentary stay strictly focused on the object, device, or technical topic itself.
-*   Neutral (Label 1): People or reactions may appear in the video, but they do so incidentally — the host is not actively directing the speech to persuade, involve, or connect with the audience.
-*   High Engaging (Label 2): Includes direct address to the viewer (using personal pronouns like "you"), an explicit call-to-action, or visible social proof (reactions, smiles, group participation, registrations, applause).
-
-### DIMENSION 4: NARRATIVE CLOSURE (PAYOFF)
-*   Low Engaging (Label 0): Ends simply because the last specification or feature on the list was reached. There was never a narrative thread or storyline to close in the first place.
-*   Neutral (Label 1): Ends abruptly, ambiguously, or with an unresolved thread. Multiple sub-scenes may have been introduced throughout the video but they never converge to a unified conclusion.
-*   High Engaging (Label 2): Ends by tying clean back to the opening hook with a concrete resolution — the initial question is answered, the product usage is justified, the conflict is resolved, or the core argument is definitively concluded.
-
+DIMENSION 4: NARRATIVE CLOSURE
+- Low (0): Ends abruptly when the spec list finishes. No narrative thread to close.
+- Neutral (1): Ends ambiguously or leaves sub-scenes unresolved without convergence.
+- High (2): Ties cleanly back to the opening hook with a concrete resolution or answered question.
 """
 
 
@@ -645,28 +620,37 @@ def build_reasoning_guidelines(evidence_mode: str) -> str:
 
 
 def build_llm_prompt(video_context_text, content_similarity_text, narrative_pattern_text, evidence_mode) -> str:
-    sections = [f"=== 1. INPUT VIDEO CONTENT ===\n{video_context_text}"]
-    n = 2
-    if content_similarity_text is not None:
-        sections.append(f"=== {n}. CONTENT SIMILARITY REFERENCE ===\n{content_similarity_text}")
-        n += 1
-    if narrative_pattern_text is not None:
-        sections.append(f"=== {n}. DISCOURSE PATTERN REFERENCE ===\n{narrative_pattern_text}")
-        n += 1
-
-    # sections.append(f"=== {n}. REASONING EXAMPLE ===\n{build_reasoning_example(evidence_mode)}")
-    sections.append(f"=== REASONING GUIDELINES ===\n{build_reasoning_guidelines(evidence_mode)}")
-    sections.append(f"""Respond ONLY with a JSON object, no text outside the braces. You MUST strictly follow the step-by-step verification inside the JSON layout:
-{{
-  "step_1_reference_check": "State the majority label inside the CONTENT SIMILARITY REFERENCE and its agreement level (e.g., 'Majority is 0 with strong agreement'). If no references exist, state 'None'.",
-  "step_2_retention_trigger_check": "Scan the input captions. Is there any explicit high-energy hook, celebrity anchor, unexpected device failure/retry, or dynamic switch between different locations? (Yes/No and briefly list them. If none, write 'None').",
-  "predicted_label": "{_valid_labels_str}",
-  "explanation": "A plain-language review explaining the alignment between the references and the video's actual action flow. Mention specific scenes. No system names or scores.",
+    sections = [
+        "## Target Video Content",
+        video_context_text
+    ]
+    
+    if content_similarity_text:
+        sections.extend(["## Content References", content_similarity_text])
+    if narrative_pattern_text:
+        sections.extend(["## Discourse References", narrative_pattern_text])
+        
+    sections.append("## Instruction")
+    sections.append(
+        "Analyze the target video based on the criteria. Output ONLY a valid JSON object. "
+        "Do not include any intro, outro, or markdown code block formatting like ```json outside the braces."
+    )
+    
+    sections.append("""Expected JSON format:
+{
+  "dimension_1_hook": "Analysis of opening stakes (Low/Neutral/High) based on text.",
+  "dimension_2_demonstration": "Analysis of live testing or active progression.",
+  "dimension_3_engagement": "Analysis of viewer-directed language or social proof.",
+  "dimension_4_closure": "Analysis of final resolution and hook tie-back.",
+  "reference_alignment": "Briefly note if historical references align with this structural pattern.",
+  "predicted_label": "0, 1, or 2",
+  "explanation": "A concise summary tying the dimension analysis to the final predicted label. Mention specific scene numbers.",
   "improvement_suggestions": [
-    "Actionable suggestion 1.",
-    "Actionable suggestion 2."
+    "Actionable suggestion 1 to elevate video engagement.",
+    "Actionable suggestion 2 to elevate video engagement."
   ]
-}}""")
+}""")
+    
     return "\n\n".join(sections)
 
 
