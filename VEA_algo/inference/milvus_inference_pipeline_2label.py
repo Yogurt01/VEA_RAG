@@ -684,15 +684,15 @@ def generate_input_video_context(folder_name: str, data: dict, data_root: Path, 
     n_scenes = len(scene_ids_list)
     raw_caption_list = [captions_dict.get(int(sid), "No caption available.") for sid in scene_ids_list]
     
-    if str(evidence_mode).lower() in ["none", "content", "edge", "full", "graph"]:
+    if str(evidence_mode).lower() in ["none"]:
         dps_captions = raw_caption_list
-    else:
+    else:  # "content", "edge", "full"
         dps_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
 
     lines = [f"Total scenes: {n_scenes}", ""]
     for idx, scene_id in enumerate(scene_ids_list[:20]):
         cap = dps_captions[idx] if idx < len(dps_captions) else "No caption available."
-        cap = cap[:130] + '...' if len(cap) > 130 else cap
+        # cap = cap[:130] + '...' if len(cap) > 130 else cap
         lines.append(f'  Scene {int(scene_id)}: "{cap}"')
 
     return "\n".join(lines)
