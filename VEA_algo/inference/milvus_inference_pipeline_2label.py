@@ -1,8 +1,8 @@
 """
-milvus_inference_pipeline.py
+milvus_inference_pipeline_2label.py
 --------------------------------------------------------------------------------------------------
 Usage: 
-    python milvus_inference_pipeline.py --evidence_mode edge \
+    python milvus_inference_pipeline_2label.py --evidence_mode edge \
         --data_root .../All_Videos --split_file .../dataset_splits.json \
         --checkpoint_path .../ablation_edge.json \
         --content_collection_name video_scenes_collection \
@@ -659,7 +659,8 @@ MILVUS_OUTPUT_FIELDS = ["scene_uid", "video_id", "video_label", "caption"]
 # 11. HELPER FUNCTIONS
 # ==========================================
 
-def generate_input_video_context(folder_name: str, data: dict, data_root: Path, mode="full") -> str:
+def generate_input_video_context(folder_name: str, data: dict, data_root: Path, evidence_mode: str = "full") -> str:
+    """Hiển thị caption của video test — giờ đi qua DPS (chú thích đường đi diễn ngôn về scene gốc)."""
     seg_path       = data_root / folder_name / "segments.json"
     scene_ids_list = data['scene_ids']
     captions_dict  = {}
@@ -682,16 +683,16 @@ def generate_input_video_context(folder_name: str, data: dict, data_root: Path, 
 
     n_scenes = len(scene_ids_list)
     raw_caption_list = [captions_dict.get(int(sid), "No caption available.") for sid in scene_ids_list]
-
-    if mode in ["content", "none"]:
-        display_captions = raw_caption_list
+    
+    if str(evidence_mode).lower() in ["none", "content", "edge", "full", "graph"]:
+        dps_captions = raw_caption_list
     else:
-        display_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
+        dps_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
 
     lines = [f"Total scenes: {n_scenes}", ""]
     for idx, scene_id in enumerate(scene_ids_list[:20]):
-        cap = display_captions[idx] if idx < len(display_captions) else "No caption available."
-        cap = cap[:200] + '...' if len(cap) > 200 else cap
+        cap = dps_captions[idx] if idx < len(dps_captions) else "No caption available."
+        cap = cap[:130] + '...' if len(cap) > 130 else cap
         lines.append(f'  Scene {int(scene_id)}: "{cap}"')
 
     return "\n".join(lines)
@@ -918,7 +919,7 @@ def main(args: argparse.Namespace) -> None:
                 segments = json.load(f)
             captions = load_captions_by_index(segments, sample_data['scene_ids'])
 
-            video_context_text = generate_input_video_context(folder, sample_data, data_root, args.evidence_mode)
+            video_context_text = generate_input_video_context(folder, sample_data, data_root, evidence_mode)
 
             content_similarity_text = None
             content_hits_record     = []
