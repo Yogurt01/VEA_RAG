@@ -1,3 +1,4 @@
+%%writefile /kaggle/working/inference/milvus_inference_pipeline_3label.py
 """
 milvus_inference_pipeline_3label.py
 --------------------------------------------------------------------------------------------------
@@ -63,8 +64,6 @@ RST_DESCRIPTIONS = {
     'ATTRIBUTION':          'attributed to',
 }
 
-# Thứ tự CỐ ĐỊNH — dùng làm chiều cho topology vector (Nuclearity Scoring),
-# đảm bảo mọi video (test lẫn training) đều so sánh trên đúng cùng 1 hệ trục.
 # CANONICAL_RST_TYPES = tuple(sorted(RST_DESCRIPTIONS.keys()))
 CANONICAL_RST_TYPES = [
     "TEMPORAL", 
@@ -90,9 +89,25 @@ def rst_to_natural(rst_type: str) -> str:
 # ==========================================
 
 LABEL_DEFINITIONS = {
-    0: "Label 0 (Low Engaging): Passive walkthrough, text-heavy, or spec-focused list. Merely observes static components with no audience connection.",
-    1: "Label 1 (Neutral): Standard presentation with a human element (studio host, linear unboxing, simple vlogs). Logical flow but lacks high-stakes testing or unexpected twists.",
-    2: "Label 2 (High Engaging): Active retention triggers present (bold opening hooks, real-time stress testing, dynamic location switches, strong viewer address)."
+    0: (
+        "Low Engaging — The video is purely observational. It presents objects, facts, or events "
+        "one after another without ever engaging the viewer directly, and without building toward "
+        "any specific point, outcome, or resolution. This holds true regardless of genre or how "
+        "much detail or emotion the content itself contains — what matters is whether the video "
+        "reaches out to an audience and goes somewhere, not how rich the content is."
+    ),
+    1: (
+        "Neutral — The video has some structure, personality, or forward motion, but is only "
+        "partially engaging: it may lightly acknowledge the viewer or move toward a point without "
+        "fully committing to either, may proceed through its content without any real tension or "
+        "payoff, or may introduce several ideas that never quite converge."
+    ),
+    2: (
+        "High Engaging — The video actively reaches out to the viewer (speaking to them directly, "
+        "inviting a response, or showing a real audience responding) AND has a clear sense of "
+        "direction — it is working toward answering a question, proving a claim, or resolving a "
+        "situation, and it follows through on that by the end."
+    ),
 }
 
 # Nhãn ngắn gọn dùng để in trong evidence blocks (content similarity / discourse pattern).
@@ -114,8 +129,16 @@ _valid_labels_set = set(LABEL_DEFINITIONS.keys())
 # ==========================================
 
 REFERENCE_SOURCE_DOCS = {
-    "content": "Historical cases with highly similar thematic content:",
-    "edge": "Historical cases with similar structural/discourse flows:"
+    "content": """1. CONTENT SIMILARITY REFERENCE (PRIMARY SOURCE):
+   - These are the most visually and thematically similar REFERENCE VIDEOS found in the
+     library (deduplicated — each is a distinct video, not repeated scenes from the same video).
+   - This serves as your primary external baseline for evaluation, as it reflects solid thematic alignment.
+   - Each block reports its own internal agreement (strong / weak / mixed). Treat "weak" or "mixed" as low-confidence.""",
+    "edge": """2. DISCOURSE PATTERN REFERENCE (SECONDARY/SUPPLEMENTARY SOURCE):
+   - These results come from matching individual scenes of the input video against a library
+     of scenes using BOTH content similarity AND discourse structure similarity.
+   - This block is purely supplementary and should be used as secondary reference context 
+     rather than an equal decision-making signal to content similarity.""",
 }
 
 CONFLICT_RESOLUTION_NOTE = (
@@ -126,44 +149,39 @@ CONFLICT_RESOLUTION_NOTE = (
 )
 
 CALIBRATION_NOTE = (
-    "- Judge the video on its own specific merits. Low Engaging, Neutral, and High Engaging "
-    "are all equally valid, equally common outcomes — do not treat Label 0 as a harsh verdict "
-    "to avoid, or Label 1 as a safe 'unsure' default. Point to a concrete reason from the Core "
-    "Distinction Criteria below for whichever label you choose.\n"
-    "- Two traps to actively avoid: (1) A video with rich technical detail or many scenes is "
-    "NOT automatically more engaging — a long, detailed spec list is still Label 0 if it never "
-    "builds a hook, demonstration, or resolution. (2) A video that merely CONTAINS a narrative "
-    "element (a task, a conflict, a journey) is not automatically Label 2 — check whether that "
-    "narrative actually resolves and actively engages the audience, or it stays Label 1."
+    "- Judge the video on its own specific merits.Low Engaging, Neutral, and High Engaging "
+    "are equally valid default-free outcomes — each requires you to point to a concrete, "
+    "identifiable reason in the video (or in the references) rather than an assumption in "
+    "either direction."
 )
 
-
 CONTENT_PATTERN_NOTES = """
-CRITICAL SCORING RULES:
-- Label 2: Requires High Engaging indicators in at least 3 out of 4 dimensions.
-- Label 1: Present in only 1 or 2 dimensions, or follows predictable Neutral patterns.
-- Label 0: Zero High Engaging indicators met. Length or text density does NOT prevent a Label 0.
+# CORE DISTINCTION CRITERIA
 
-DIMENSION 1: OPENING HOOK & STAKES
-- Low (0): Flat product/technical intro with zero audience-directed language.
-- Neutral (1): Plain topic introduction with no real tension or stakes.
-- High (2): Pointed question or bold claim creating immediate curiosity ("why you should care").
+These criteria are genre-agnostic — apply them the same way to a product review, a vlog, a
+tutorial, or a dialogue scene. Judge how the video relates to its audience and where it is
+going, not what topic it happens to cover.
 
-DIMENSION 2: DEMONSTRATION & SUSPENSE
-- Low (0): Static narration, spec lists, or side-by-side text comparisons without active action.
-- Neutral (1): Simple task or minor human action, resolved instantly with no real payoff.
-- High (2): Real-time stress-testing, surprise outcomes (attempt -> failure -> retry), or live reactions.
+| Dimension | Low Engaging (0) | Neutral (1) | High Engaging (2) |
+| :--- | :--- | :--- | :--- |
+| **Audience Connection** — does the video acknowledge a viewer at all? | Never speaks to, invites, or shows a reaction from an audience — plays out as something merely observed. | Occasionally acknowledges an audience, but only in passing. | Clearly speaks to the viewer, invites a response, or shows a real audience reacting. |
+| **Direction** — is the video working toward something? | Simply narrates or lists things as they appear, with no question, goal, or claim being pursued. | Moves through content step by step, but without any real tension, stakes, or payoff along the way. | Pursues a clear question, goal, or claim, with some real stakes or payoff along the way (a test, a comparison, a build-up). |
+| **Follow-through** — does it land somewhere? | Never arrives anywhere in particular — it just stops. | Touches on an idea or two but doesn't fully tie them together by the end. | Consistently builds toward and reaches one clear takeaway by the end. |
 
-DIMENSION 3: AUDIENCE ENGAGEMENT SIGNALS
-- Low (0): No audience-directed language. Strict focus on the object/device.
-- Neutral (1): Human appears incidentally, but does not actively persuade or connect with the viewer.
-- High (2): Direct address ("you"), explicit call-to-action, or visible social proof (applause, reactions).
-
-DIMENSION 4: NARRATIVE CLOSURE
-- Low (0): Ends abruptly when the spec list finishes. No narrative thread to close.
-- Neutral (1): Ends ambiguously or leaves sub-scenes unresolved without convergence.
-- High (2): Ties cleanly back to the opening hook with a concrete resolution or answered question.
+Important calibration notes:
+- A narrator or host simply describing, presenting, or explaining something is NOT by itself
+  audience connection — narration ABOUT the content is different from speaking TO the viewer.
+- Perfunctory or ritual gestures — an opening greeting, a channel logo/jingle, background music,
+  a rhetorical question nobody is meant to answer — do NOT count as audience connection either.
+  Only count it when there is a genuine, deliberate moment: direct second-person address ("you"),
+  an explicit call-to-action or invitation, or a visible audience actually reacting.
+- Most real videos will have at most one or two of these three rows lean positive, not all three
+  — do not require a perfect match on every row, but also do not round a video up to Label 1 or 2
+  just because it clears one row weakly. A confident, detailed, well-produced video with zero
+  genuine audience connection anywhere is still Label 0, however articulate it is.
 """
+
+
 
 
 def build_system_prompt(evidence_mode: str) -> str:
@@ -559,17 +577,17 @@ def build_discourse_context(query_dps_captions: list, ranked_top: list) -> tuple
 def build_reasoning_example(evidence_mode: str) -> str:
     bullets = []
     if evidence_mode in ("content", "full"):
-        bullets.append("- Content similarity: label distribution across 5 distinct reference videos is 4×Label 2, 1×Label 1. [agreement: strong]")
+        bullets.append("- Content similarity: label distribution across 5 distinct reference videos is 4×Label 0, 1×Label 1. [agreement: strong]")
     if evidence_mode in ("edge", "full"):
         bullets.append(
-            '- Discourse pattern: label distribution across 5 distinct reference videos is 3×Label 0, 2×Label 2. [agreement: weak]\n'
+            '- Discourse pattern: label distribution across 5 distinct reference videos is 3×Label 1, 2×Label 0. [agreement: weak]\n'
             '  Top match: Blended score 0.81 (dense=0.85, topology=0.70) | LOW ENGAGING\n'
-            '  "A close-up product reveal [Discourse: elaborates on Scene 2, eventually leading to the video\'s core scene]"'
+            '  "A static close-up of an internal component [Discourse: elaborates on Scene 2, eventually leading to the video\'s core scene]"'
         )
     if evidence_mode == "full":
-        bullets.append("- The two sources disagree; content shows 'strong' agreement while discourse pattern shows only "
-                        "'weak' agreement, so content gets more weight here per the confidence-based rule — but "
-                        "the video's own content is still the primary basis for the final call.")
+        bullets.append("- Both sources lean the same direction (Low Engaging) but with different strength; content shows "
+                        "'strong' agreement while discourse pattern shows only 'weak' agreement, so content gets more weight "
+                        "here per the confidence-based rule — but the video's own content is still the primary basis for the final call.")
     if not bullets:
         bullets.append("- No reference library is used in this setting — judged purely from the video's own content and structure.")
 
@@ -580,76 +598,85 @@ def build_reasoning_example(evidence_mode: str) -> str:
 
 [Expected output]:
 {{
-  "step_1_reference_check": "Majority is 2 with strong agreement (4xLabel 2, 1xLabel 1).",
-  "step_2_retention_trigger_check": "Yes. Scene 2 features an explicit bold product reveal with dynamic host interaction.",
-  "predicted_label": "2",
-  "explanation": "Scene 2 delivers a clear, specific hook (the reveal itself), and the reference videos with a similar pattern and strong agreement were mostly High Engaging. The transition sequence builds toward that reveal rather than repeating itself.",
+  "audience_connection": "None found. The captions describe the narrator explaining features scene by scene, but no scene has the narrator speak to 'you', invite a response, or show anyone reacting.",
+  "direction_and_followthrough": "The scenes move from one feature to the next in sequence, but nothing is being tested, questioned, or built toward — the video simply stops once the last feature is listed.",
+  "predicted_label": "0",
+  "explanation": "Despite covering many specific details in a confident, well-organized way, the video never reaches out to a viewer and never works toward a point or payoff — it only narrates what is being shown, scene after scene, which matches Low Engaging rather than Neutral or High Engaging.",
   "improvement_suggestions": [
-    "Add a brief reaction shot right after the reveal in Scene 2 to extend the payoff.",
-    "Vary the pacing slightly earlier in the video to build more anticipation before the reveal."
+    "Add a direct line to the viewer (e.g. a question or a call-to-action) near the start or end.",
+    "Frame the walkthrough around a specific question or comparison the video will resolve, instead of a plain feature list."
   ]
 }}
----"""
+---""" 
 
 
 def build_reasoning_guidelines(evidence_mode: str) -> str:
     primary_filter = (
-        "1. **BALANCED CONTENT EVALUATION**: Carefully analyze the input video's structural progression "
-        "and logical flow based on the captions. Evaluate whether the scenes are organized with a clear focus, "
-        "a purposeful sequence, or rich sensory details (as defined in the Core Distinction Criteria). "
-        "Do not automatically default to Label 0 just because the text describes everyday or routine actions; "
-        "instead, judge whether those actions build toward a meaningful progression or outcome."
+        "1. **BALANCED CONTENT EVALUATION**: Carefully read the input video's captions in order and "
+        "judge it against the Core Distinction Criteria table above — how it connects with its "
+        "audience and whether it goes somewhere. Do not automatically default to Label 0 just because "
+        "the text describes everyday or routine actions, and do not default to Label 2 just because "
+        "the video is detailed, confident, or well-produced — a good narrator is not the same as "
+        "audience connection or follow-through. Base the label on the overall balance across the table."
     )
 
     if evidence_mode == "none":
         return (
             f"{primary_filter}\n"
-            "2. **FINAL DECISION**: Synthesize your observations across all four core dimensions with equal "
-            "probability. Base your final label and plain-language explanation strictly on this objective structural analysis."
+            "2. **FINAL DECISION**: Weigh the three dimensions together as a whole, rather than requiring "
+            "a perfect match on every row. Base your final label and plain-language explanation strictly "
+            "on this objective analysis of the video's own content."
         )
-    
+
     return (
         f"{primary_filter}\n"
-        "2. **REFERENCE CROSS-EXAMINATION**: Examine the provided reference examples as contextual anchors. "
-        "Look for similarities in structural dynamics, theme progression, or reaction patterns to help calibrate "
-        "your judgment, especially for borderline cases.\n"
-        "3. **INTEGRATED JUDGMENT**: Combine your independent content analysis with the evidence from the references. "
-        "If the reference library shows a strong consensus (agreement: strong), give that structural signal "
-        "significant weight in your final prediction."
+        "2. **REFERENCE CROSS-EXAMINATION (MANDATORY)**: You MUST explicitly state the majority label "
+        "and confidence reported in the reference section(s) before giving your final answer — this is "
+        "not optional context, it is a required check. If the reference library reports 'strong' "
+        "agreement and your own content analysis is uncertain or borderline, change your prediction to "
+        "match the reference majority unless you can cite a specific, concrete detail in the video's "
+        "own captions that contradicts it.\n"
+        "3. **INTEGRATED JUDGMENT**: Only keep your own independent reading over a 'strong' reference "
+        "consensus if you can point to that concrete contradicting detail. If the reference shows 'weak' "
+        "or 'mixed' agreement, rely primarily on your own content analysis instead."
     )
 
 
 def build_llm_prompt(video_context_text, content_similarity_text, narrative_pattern_text, evidence_mode) -> str:
     sections = [
-        "## Target Video Content",
+        "## 1. Target Video Content (Primary Ground Truth)",
         video_context_text
     ]
     
     if content_similarity_text:
-        sections.extend(["## Content References", content_similarity_text])
+        sections.extend(["## 2. Content References (Primary Baseline)", content_similarity_text])
     if narrative_pattern_text:
-        sections.extend(["## Discourse References", narrative_pattern_text])
-        
-    sections.append("## Instruction")
-    sections.append(
-        "Analyze the target video based on the criteria. Output ONLY a valid JSON object. "
-        "Do not include any intro, outro, or markdown code block formatting like ```json outside the braces."
-    )
+        sections.extend(["## 3. Discourse References (Secondary Supplementary)", narrative_pattern_text])
     
-    sections.append("""Expected JSON format:
-{
-  "dimension_1_hook": "Analysis of opening stakes (Low/Neutral/High) based on text.",
-  "dimension_2_demonstration": "Analysis of live testing or active progression.",
-  "dimension_3_engagement": "Analysis of viewer-directed language or social proof.",
-  "dimension_4_closure": "Analysis of final resolution and hook tie-back.",
-  "reference_alignment": "Briefly note if historical references align with this structural pattern.",
-  "predicted_label": "0, 1, or 2",
-  "explanation": "A concise summary tying the dimension analysis to the final predicted label. Mention specific scene numbers.",
+    sections.append(f"## Reasoning Guidelines\n{build_reasoning_guidelines(evidence_mode)}")
+
+    has_reference = bool(content_similarity_text or narrative_pattern_text)
+    reference_field = (
+        '\n  "reference_agreement": "State the majority label and confidence reported in the '
+        'reference section(s) above, and explicitly say whether your own reading of the video '
+        'content agrees or disagrees with it, and why.",' if has_reference else ""
+    )
+
+    sections.append("## Instruction")
+    sections.append(f"""Analyze the target video based on the criteria. Output ONLY a valid JSON object.
+Do not include any markdown block ticks like ```json outside the braces.
+
+Expected JSON format:
+{{
+  "audience_connection": "Quote the exact scene and phrase that shows direct address, a call-to-action, or a real audience reacting — or write 'None found' if there is none. Do not paraphrase a vague acknowledgment as a quote.",
+  "direction_and_followthrough": "Briefly note what the video is working toward, if anything, and whether it follows through by the end.",{reference_field}
+  "predicted_label": "{_valid_labels_str}",
+  "explanation": "Concisely justify the final predicted label by tying the observations above together. Mention specific scenes.",
   "improvement_suggestions": [
-    "Actionable suggestion 1 to elevate video engagement.",
-    "Actionable suggestion 2 to elevate video engagement."
+    "Actionable suggestion 1 to increase retention.",
+    "Actionable suggestion 2 to increase retention."
   ]
-}""")
+}}""")
     
     return "\n\n".join(sections)
 
@@ -701,7 +728,8 @@ MILVUS_OUTPUT_FIELDS = ["scene_uid", "video_id", "video_label", "caption"]
 # 11. HELPER FUNCTIONS
 # ==========================================
 
-def generate_input_video_context(folder_name: str, data: dict, data_root: Path, mode="full") -> str:
+def generate_input_video_context(folder_name: str, data: dict, data_root: Path, evidence_mode: str = "full") -> str:
+    """Hiển thị caption của video test — giờ đi qua DPS (chú thích đường đi diễn ngôn về scene gốc)."""
     seg_path       = data_root / folder_name / "segments.json"
     scene_ids_list = data['scene_ids']
     captions_dict  = {}
@@ -724,16 +752,16 @@ def generate_input_video_context(folder_name: str, data: dict, data_root: Path, 
 
     n_scenes = len(scene_ids_list)
     raw_caption_list = [captions_dict.get(int(sid), "No caption available.") for sid in scene_ids_list]
-
-    if mode in ["content", "none"]:
-        display_captions = raw_caption_list
+    
+    if str(evidence_mode).lower() in ["none", "content", "edge", "full"]:
+        dps_captions = raw_caption_list
     else:
-        display_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
+        dps_captions = serialize_discourse_captions(raw_caption_list, data.get('rst_links', []), n_scenes)
 
     lines = [f"Total scenes: {n_scenes}", ""]
     for idx, scene_id in enumerate(scene_ids_list[:20]):
-        cap = display_captions[idx] if idx < len(display_captions) else "No caption available."
-        cap = cap[:200] + '...' if len(cap) > 200 else cap
+        cap = dps_captions[idx] if idx < len(dps_captions) else "No caption available."
+        cap = cap[:130] + '...' if len(cap) > 130 else cap
         lines.append(f'  Scene {int(scene_id)}: "{cap}"')
 
     return "\n".join(lines)
