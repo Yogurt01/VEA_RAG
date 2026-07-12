@@ -1,22 +1,22 @@
 """
-inference_pipeline_2label.py
+inference_pipeline_2label_dps.py
 --------------------------------------------------------------------------------------------------
 Usage:
-    python inference_pipeline_2label.py --evidence_mode milvus \
+    python inference_pipeline_2label_dps.py --evidence_mode milvus \
         --data_root .../All_Videos --split_file .../dataset_splits.json \
-        --checkpoint_path .../ablation_milvus.json \
+        --checkpoint_path .../ablation_dps.json \
         --collection_name video_scenes_collection \
         --video_reps_dir .../video_representations_dir \
         --alpha 0.7 --top_k 5 --search_limit 30 \
         --model_name .../Qwen3-4B-Instruct-2507
 
     # Precompute retrieval cache (CPU only)
-    python inference_pipeline_2label.py --evidence_mode milvus \
+    python inference_pipeline_2label_dps.py --evidence_mode milvus \
         --data_root .../All_Videos --split_file .../dataset_splits.json \
         --collection_name video_scenes_collection \
         --video_reps_dir .../video_representations_dir \
         --alpha 0.7 --top_k 5 --search_limit 30 \
-        --retrieval_cache_path .../indexing/retrieval_cache.json --precompute_retrieval
+        --retrieval_cache_path .../indexing/retrieval_cache_dps.json --precompute_retrieval
 """
 
 import os
@@ -90,7 +90,100 @@ def rst_to_natural(rst_type: str) -> str:
 
 
 # ==========================================
-# 2. LABEL DEFINITIONS
+# 2. DISCOURSE PATH SERIALIZATION (DPS)
+# ==========================================
+
+def serialize_discourse_captions(scene_ids: list, rst_links: list, captions_list: list, hit_scene_id: int = None) -> str:
+    """
+    Sắp xếp và cấu trúc lại chuỗi caption dựa trên mối quan hệ Discourse (RST Links).
+    Nếu có hit_scene_id (dành cho video tham chiếu), hàm sẽ tự động cắt tỉa nhánh cây câu chuyện 
+    chỉ giữ lại cảnh đó và các cảnh cha/con liên quan trực tiếp để tối ưu hóa lượng token.
+    """
+    if not rst_links:
+        if hit_scene_id is not None:
+            try:
+                idx = scene_ids.index(hit_scene_id)
+                return f"  - Scene {hit_scene_id}: \"{captions_list[idx][:150]}\""
+            except ValueError:
+                pass
+        return "\n".join([f"  Scene {sid}: \"{cap[:150]}\"" for sid, cap in zip(scene_ids, captions_list)])
+    
+    adj = {}
+    parent_map = {}
+    relations = {}
+    
+    for src, tgt, rel in rst_links:
+        src, tgt = int(src), int(tgt)
+        rel_norm = normalize_rst_type(rel)
+        adj.setdefault(tgt, []).append((src, rel_norm))
+        parent_map[src] = tgt
+        relations[(src, tgt)] = rel_norm
+        
+    roots = [sid for sid in scene_ids if sid not in parent_map]
+    if not roots:
+        roots = [scene_ids[0]] if scene_ids else []
+        
+    # --- THUẬT TOÁN CẮT TỈA: CHỈ GIỮ LẠI CẢNH CHA VÀ CON LIÊN QUAN TRỰC TIẾP ---
+    relevant_nodes = None
+    if hit_scene_id is not None:
+        relevant_nodes = {hit_scene_id}
+        if hit_scene_id in parent_map:
+            relevant_nodes.add(parent_map[hit_scene_id])
+        if hit_scene_id in adj:
+            for child, _ in adj[hit_scene_id]:
+                relevant_nodes.add(child)
+        
+    visited = set()
+    lines = []
+    
+    def dfs(node, depth=0):
+        if node in visited:
+            return
+        visited.add(node)
+        
+        # Chỉ ghi nhận phân cảnh nếu nó nằm trong bộ lọc các node liên quan cục bộ
+        if relevant_nodes is None or node in relevant_nodes:
+            try:
+                idx = scene_ids.index(node)
+                cap = captions_list[idx]
+            except ValueError:
+                cap = "No caption available."
+                
+            cap_short = cap[:180] + "..." if len(cap) > 180 else cap
+            indent = "  " * depth
+            
+            if node in parent_map:
+                p = parent_map[node]
+                rel = relations.get((node, p), "SPAN")
+                rel_nat = rst_to_natural(rel)
+                lines.append(f"{indent}- Scene {node} ({rel_nat} Scene {p}): \"{cap_short}\"")
+            else:
+                lines.append(f"{indent}- Scene {node} [Narrative Core/Root]: \"{cap_short}\"")
+                
+        if node in adj:
+            for child, _ in adj[node]:
+                dfs(child, depth + 1)
+                
+    for r in roots:
+        dfs(r)
+        
+    # Xử lý các node cô lập (Chỉ hiển thị nếu chính nó là node cô lập trúng tuyển từ Milvus)
+    for sid in scene_ids:
+        if sid not in visited:
+            if relevant_nodes is None or sid in relevant_nodes:
+                try:
+                    idx = scene_ids.index(sid)
+                    cap = captions_list[idx]
+                except ValueError:
+                    cap = "No caption available."
+                cap_short = cap[:180] + "..." if len(cap) > 180 else cap
+                lines.append(f"- Scene {sid} [Isolated]: \"{cap_short}\"")
+                
+    return "\n".join(lines)
+
+
+# ==========================================
+# 3. LABEL DEFINITIONS
 # ==========================================
 
 LABEL_DEFINITIONS = {
@@ -105,16 +198,15 @@ _valid_labels_str = " or ".join(str(k) for k in sorted(LABEL_DEFINITIONS.keys())
 
 
 # ==========================================
-# 3. SYSTEM PROMPT
+# 4. SYSTEM PROMPT
 # ==========================================
 
 REFERENCE_SOURCE_DOC = """REFERENCE VIDEOS (PRIMARY SOURCE):
-   - These are the most similar REFERENCE VIDEOS found in the library (deduplicated — each is
-     a distinct video, not repeated scenes from the same video), retrieved by combining content
+   - These are the most similar REFERENCE VIDEOS found in the library, retrieved by combining content
      similarity with narrative/discourse-structure similarity.
-   - This serves as your primary external baseline for evaluation, as it reflects solid thematic
-     and structural alignment with the input video.
-   - Each block reports its own internal agreement (strong / weak / mixed). Treat "weak" or "mixed" as low-confidence."""
+   - For accuracy, each reference video has been structured using Discourse Path Serialization (DPS) 
+     to preserve its logical story hierarchy.
+   - Treat "weak" or "mixed" agreement blocks as low-confidence signals."""
 
 CALIBRATION_NOTE = (
     "- Judge the video on its own specific merits. Both High Engagement and Low Engagement "
@@ -135,19 +227,19 @@ To accurately separate High-Engagement (Label 1) from Low-Engagement (Label 0), 
 | **3. Content Specificity** | Elaborates with high-sensory details, unique flavor profiles, surprising contrasts, or strong reactions/outcomes later in the sequence. | Remains shallow or uniformly vague throughout; lacks detailed elaboration, unique selling points, or definitive outcomes. |
 | **4. Structural Dynamics** | Creates a complete meaningful loop (e.g., establishing a plan -> execution -> reaction, or setting a boundary -> conflict -> resolution). | Feels incomplete, randomly cut off, or disjointed, failing to connect the opening premise to a satisfying conclusion. |
 
-*Note: Since you are reading textual captions, do not penalize a video just because its scenes describe daily or routine tasks. Instead, look closely at whether those tasks are organized into a purposeful, high-progression sequence (Label 1) or remain a flat, directionless compilation (Label 0).*
+*Note: When analyzing textual captions organized by Discourse Path Serialization (DPS), pay close attention to how sub-scenes elaborate on or contrast with the Narrative Core/Root scenes.*
 """
 
 
 def build_system_prompt(evidence_mode: str) -> str:
     if evidence_mode == "milvus":
-        intro = " cross-reference it with similar contexts retrieved from a reference library,"
+        intro = " cross-reference it with similar serialized discourse contexts retrieved from a reference library,"
         reference_block = "How to use the reference source below:\n\n" + REFERENCE_SOURCE_DOC
-        reasoning_intro = "- Read the video content first, then use the reference as supporting evidence."
+        reasoning_intro = "- Read the video content (structured via DPS) first, then use the reference as supporting evidence."
     else:
         intro = ""
         reference_block = "No external reference library is used in this setting — base your decision solely on the video content described below."
-        reasoning_intro = "- Base your decision solely on the input video's own content and structure."
+        reasoning_intro = "- Base your decision solely on the input video's own chronological content."
 
     return f"""You are an Advanced Video Analysis and Evaluation System.
 Your task is to receive the structural, textual, and multimodal information of an input video,{intro}
@@ -170,7 +262,7 @@ Reasoning instructions:
 
 
 # ==========================================
-# 4. EVIDENCE LEAN + CONFIDENCE
+# 5. EVIDENCE LEAN + CONFIDENCE
 # ==========================================
 
 def evidence_lean_and_confidence(n_pos: int, n_total: int):
@@ -186,7 +278,7 @@ def evidence_lean_and_confidence(n_pos: int, n_total: int):
 
 
 # ==========================================
-# 5. NUCLEARITY SCORING & HYBRID RETRIEVAL
+# 6. NUCLEARITY SCORING & HYBRID RETRIEVAL
 # ==========================================
 
 def load_captions_by_index(segments, scene_ids_list, max_len: int = 990):
@@ -203,7 +295,6 @@ def load_captions_by_index(segments, scene_ids_list, max_len: int = 990):
 
 
 def compute_topology_vector(rst_links: list) -> list:
-    """Tạo vector cấu trúc (chuẩn hóa L1) theo danh sách CANONICAL_RST_TYPES."""
     counts = Counter()
     for link in rst_links:
         try:
@@ -241,6 +332,7 @@ def load_candidate_video_data(video_id: str, data_root: Path, cache: dict) -> di
             "scene_ids":       scene_ids_list,
             "raw_captions":    raw_captions,
             "topology_vector": compute_topology_vector(rst_links),
+            "rst_links":       rst_links
         }
     except Exception:
         data = None
@@ -256,11 +348,6 @@ def retrieve_discourse_evidence(
     current_video_id: str, milvus_client, collection_name: str, data_root: Path,
     top_k: int, search_limit: int, alpha: float,
 ) -> list:
-    """
-    Cross-Modal Self-Querying kết hợp Nuclearity-Weighted RAG:
-    Thực hiện truy vấn một lần duy nhất bằng vector V_video của video kiểm tra,
-    sau đó thực hiện Re-ranking bằng cách kết hợp dense similarity và topology similarity.
-    """
     if query_vec is None:
         return []
 
@@ -292,21 +379,41 @@ def retrieve_discourse_evidence(
         final_score = alpha * dense_sim + (1 - alpha) * topo_sim
 
         if vid not in best_per_video or final_score > best_per_video[vid]["score"]:
-            s_uid = h["entity"].get("scene_uid", "")
-            matched_caption = h["entity"].get("caption", "")
-            try:
-                matched_scene_id = int(s_uid.rsplit("_", 1)[-1])
-                matched_idx = cand_data["scene_ids"].index(matched_scene_id)
-                matched_caption = cand_data["raw_captions"][matched_idx]
-            except Exception:
-                pass
+            
+            # --- BẮT ĐẦU TRÍCH XUẤT ĐÚNG ID CỦA SCENE ĐƯỢC RETRIEVE ---
+            hit_scene_id = None
+            scene_uid = h["entity"].get("scene_uid", "")
+            
+            # Khớp chuỗi UID dạng "video123_scene_2" hoặc "video123_2" để lấy ID số phân cảnh
+            match = re.search(r'_scene_(\d+)$|_(\d+)$', str(scene_uid))
+            if match:
+                hit_scene_id = int(match.group(1) or match.group(2))
+            
+            # Dự phòng: Tự động so khớp văn bản nếu chuỗi UID không chứa số phân cảnh rõ ràng
+            if hit_scene_id is None or hit_scene_id not in cand_data["scene_ids"]:
+                hit_caption = h["entity"].get("caption", "").strip()
+                for sid, cap in zip(cand_data["scene_ids"], cand_data["raw_captions"]):
+                    if hit_caption[:40] in cap or cap[:40] in hit_caption:
+                        hit_scene_id = sid
+                        break
+            
+            # Nếu tất cả thất bại, đặt mặc định về phân cảnh đầu tiên của video để tránh lỗi crash
+            if hit_scene_id is None and cand_data["scene_ids"]:
+                hit_scene_id = cand_data["scene_ids"][0]
+            # --------------------------------------------------------
+
+            # Áp dụng DPS thu gọn cho Video Tham Chiếu bằng cách truyền tham số hit_scene_id
+            serialized_dps = serialize_discourse_captions(
+                cand_data["scene_ids"], cand_data["rst_links"], cand_data["raw_captions"],
+                hit_scene_id=hit_scene_id
+            )
 
             best_per_video[vid] = {
                 "score":           final_score,
                 "dense_sim":       dense_sim,
                 "topology_sim":    topo_sim,
                 "video_label":     h["entity"]["video_label"],
-                "matched_caption": matched_caption,
+                "serialized_dps":  serialized_dps,
             }
 
     ranked = sorted(best_per_video.items(), key=lambda kv: kv[1]["score"], reverse=True)
@@ -314,7 +421,7 @@ def retrieve_discourse_evidence(
 
 
 # ==========================================
-# 6. CONTEXT BUILDER — REFERENCE
+# 7. CONTEXT BUILDER — REFERENCE
 # ==========================================
 
 def build_discourse_context(ranked_top: list) -> tuple:
@@ -327,15 +434,17 @@ def build_discourse_context(ranked_top: list) -> tuple:
     n_eng = sum(1 for _, c in ranked_top if c['video_label'] == 1)
     lean, confidence = evidence_lean_and_confidence(n_eng, len(ranked_top))
 
-    lines.append(f"Top {len(ranked_top)} matching reference videos from the library:")
+    lines.append(f"Top {len(ranked_top)} matching reference videos from the library (Serialized via DPS):")
     lines.append("")
     for rank, (vid, cand) in enumerate(ranked_top, 1):
         outcome = "HIGH ENGAGEMENT" if cand['video_label'] == 1 else "LOW ENGAGEMENT"
         lines.append(
-            f"[{rank}] Outcome: {outcome}  |  Blended score: {cand['score']:.4f} "
-            f"(dense={cand['dense_sim']:.3f}, topology={cand['topology_sim']:.3f})"
+            f"[{rank}] Reference Video ID: {vid} | Outcome: {outcome} | Blended score: {cand['score']:.4f}\n"
+            f"     --- Serialized Discourse Path ---"
         )
-        lines.append(f'     "{cand["matched_caption"][:220]}"')
+        indented_dps = "\n".join(f"     {line}" for line in cand["serialized_dps"].split("\n"))
+        lines.append(indented_dps)
+        lines.append("     ---------------------------------")
         lines.append("")
 
     n_neng = len(ranked_top) - n_eng
@@ -348,7 +457,7 @@ def build_discourse_context(ranked_top: list) -> tuple:
 
 
 # ==========================================
-# 7. USER PROMPT BUILDER
+# 8. USER PROMPT BUILDER
 # ==========================================
 
 def build_reasoning_example(evidence_mode: str) -> str:
@@ -365,7 +474,7 @@ def build_reasoning_example(evidence_mode: str) -> str:
 [Expected output]:
 {{
   "predicted_label": "1",
-  "explanation": "Scene 2 delivers a clear, specific hook (the reveal itself), and the reference videos with a similar pattern and strong agreement were mostly High Engagement. The transition sequence builds toward that reveal rather than repeating itself.",
+  "explanation": "Scene 2 delivers a clear, specific hook (the reveal itself) which acts as the narrative root, and the reference videos with a similar pattern and strong agreement were mostly High Engagement. The transition sequence builds toward that reveal rather than repeating itself.",
   "improvement_suggestions": [
     "Add a brief reaction shot right after the reveal in Scene 2 to extend the payoff.",
     "Vary the pacing slightly earlier in the video to build more anticipation before the reveal."
@@ -377,7 +486,7 @@ def build_reasoning_example(evidence_mode: str) -> str:
 def build_reasoning_guidelines(evidence_mode: str) -> str:
     primary_filter = (
         "1. **BALANCED CONTENT EVALUATION**: Carefully analyze the input video's structural progression "
-        "and logical flow based on the captions. Evaluate whether the scenes are organized with a clear focus, "
+        "and logical flow based on the text. Evaluate whether the scenes are organized with a clear focus, "
         "a purposeful sequence, or rich sensory details (as defined in the Core Distinction Criteria). "
         "Do not automatically default to Label 0 just because the text describes everyday or routine actions; "
         "instead, judge whether those actions build toward a meaningful progression or outcome."
@@ -387,13 +496,13 @@ def build_reasoning_guidelines(evidence_mode: str) -> str:
         return (
             f"{primary_filter}\n"
             "2. **FINAL DECISION**: Synthesize your observations across all four core dimensions with equal "
-            "probability. Base your final label and plain-language explanation strictly on this objective structural analysis."
+            "probability. Base your final label and plain-language explanation strictly on this objective chronological analysis."
         )
 
     return (
         f"{primary_filter}\n"
         "2. **REFERENCE CROSS-EXAMINATION**: Examine the provided reference examples as contextual anchors. "
-        "Look for similarities in structural dynamics, theme progression, or reaction patterns to help calibrate "
+        "Look for similarities in structural dynamics (DPS hierarchies), theme progression, or reaction patterns to help calibrate "
         "your judgment, especially for borderline cases.\n"
         "3. **INTEGRATED JUDGMENT**: Combine your independent content analysis with the evidence from the references. "
         "If the reference library shows a strong consensus (agreement: strong), give that structural signal "
@@ -423,7 +532,7 @@ def build_llm_prompt(video_context_text, reference_text, evidence_mode) -> str:
 
 
 # ==========================================
-# 8. ENSEMBLE SYSTEM
+# 9. ENSEMBLE SYSTEM
 # ==========================================
 
 def compute_ensemble_label(llm_pred, ref_lean, ref_conf):
@@ -443,7 +552,7 @@ def compute_ensemble_label(llm_pred, ref_lean, ref_conf):
 
 
 # ==========================================
-# 9. CONSTANTS & VALIDATION
+# 10. CONSTANTS & VALIDATION
 # ==========================================
 
 REQUIRED_DATA_KEYS = [
@@ -455,10 +564,10 @@ MILVUS_OUTPUT_FIELDS = ["scene_uid", "video_id", "video_label", "caption"]
 
 
 # ==========================================
-# 10. HELPER FUNCTIONS
+# 11. HELPER FUNCTIONS
 # ==========================================
 
-def generate_input_video_context(folder_name: str, data: dict, data_root: Path) -> str:
+def generate_input_video_context(folder_name: str, data: dict, data_root: Path, mode="milvus") -> str:
     seg_path       = data_root / folder_name / "segments.json"
     scene_ids_list = data['scene_ids']
     captions_dict  = {}
@@ -479,16 +588,21 @@ def generate_input_video_context(folder_name: str, data: dict, data_root: Path) 
     except Exception:
         pass
 
-    n_scenes = len(scene_ids_list)
     raw_caption_list = [captions_dict.get(int(sid), "No caption available.") for sid in scene_ids_list]
 
-    lines = [f"Total scenes: {n_scenes}", ""]
-    for idx, scene_id in enumerate(scene_ids_list[:20]):
-        cap = raw_caption_list[idx] if idx < len(raw_caption_list) else "No caption available."
-        cap = cap[:130] + '...' if len(cap) > 130 else cap
-        lines.append(f'  Scene {int(scene_id)}: "{cap}"')
-
-    return "\n".join(lines)
+    if mode == "milvus":
+        # Áp dụng Discourse Path Serialization (DPS) đầy đủ không cắt tỉa cho video đầu vào
+        rst_links = data.get("rst_links", [])
+        return serialize_discourse_captions(scene_ids_list, rst_links, raw_caption_list, hit_scene_id=None)
+    else:
+        # Giữ nguyên cấu trúc thời gian tuyến tính bình thường ở mode "none"
+        n_scenes = len(scene_ids_list)
+        lines = [f"Total scenes: {n_scenes} (Chronological Sequence)", ""]
+        for idx, scene_id in enumerate(scene_ids_list[:20]):
+            cap = raw_caption_list[idx] if idx < len(raw_caption_list) else "No caption available."
+            cap = cap[:130] + '...' if len(cap) > 130 else cap
+            lines.append(f'  Scene {int(scene_id)}: "{cap}"')
+        return "\n".join(lines)
 
 
 def load_video_representations(video_reps_dir: Path) -> dict:
@@ -533,7 +647,7 @@ def load_valid_videos(data_root: Path, split_file: Path, reps_by_folder: dict, r
 
 
 # ==========================================
-# 11. RETRIEVAL CACHE HELPERS
+# 12. RETRIEVAL CACHE HELPERS
 # ==========================================
 
 def load_retrieval_cache(path: Path) -> dict:
@@ -557,15 +671,14 @@ def save_retrieval_cache(cache: dict, path: Path) -> None:
 
 
 # ==========================================
-# 12. PRECOMPUTE RETRIEVAL (CPU only)
+# 13. PRECOMPUTE RETRIEVAL (CPU only)
 # ==========================================
 
 def run_precompute_retrieval(args: argparse.Namespace) -> None:
     """
-    Chạy riêng bước retrieval (Milvus + topology re-rank) cho toàn bộ video test,
+    Chạy riêng bước retrieval (Milvus + topology re-rank + DPS) cho toàn bộ video test,
     lưu kết quả vào --retrieval_cache_path, KHÔNG load model LLM — chạy trên CPU.
     """
-    # Ép chạy CPU tuyệt đối
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     if not args.retrieval_cache_path:
@@ -602,7 +715,7 @@ def run_precompute_retrieval(args: argparse.Namespace) -> None:
 
     cache = load_retrieval_cache(cache_path)
     queue = [f for f in valid_folders if f not in cache]
-    print(f"[PRECOMPUTE] evidence_mode='milvus' | {len(queue)} videos left to retrieve "
+    print(f"[PRECOMPUTE] evidence_mode='milvus' (DPS Local Subtree Pruning enabled) | {len(queue)} videos left to retrieve "
           f"(CPU only, no LLM loaded).\n")
 
     for i, folder in enumerate(queue, 1):
@@ -617,7 +730,7 @@ def run_precompute_retrieval(args: argparse.Namespace) -> None:
             if rep_vec is None:
                 raise ValueError("Missing video representation")
 
-            # Cross-Modal Self-Querying + Nuclearity-Weighted RAG (Chỉ truy vấn 1 lần)
+            # Cross-Modal Self-Querying + Nuclearity-Weighted RAG với DPS (Cắt tỉa phân cảnh cục bộ)
             ranked_top = retrieve_discourse_evidence(
                 rep_vec.squeeze().tolist(), sample_data.get('rst_links', []),
                 current_video_id=folder,
@@ -648,7 +761,7 @@ def run_precompute_retrieval(args: argparse.Namespace) -> None:
 
 
 # ==========================================
-# 13. QWEN INFERENCE HELPERS
+# 14. QWEN INFERENCE HELPERS
 # ==========================================
 
 def count_tokens_qwen(tokenizer, messages: list) -> int:
@@ -731,7 +844,7 @@ def extract_and_parse_json(raw_text: str) -> dict:
 
 
 # ==========================================
-# 14. MAIN EXECUTOR
+# 15. MAIN EXECUTOR
 # ==========================================
 
 def main(args: argparse.Namespace) -> None:
@@ -740,7 +853,7 @@ def main(args: argparse.Namespace) -> None:
     checkpoint_path = Path(args.checkpoint_path)
     evidence_mode   = args.evidence_mode
 
-    need_reference = evidence_mode == "milvus"
+    need_reference = (evidence_mode == "milvus")
 
     milvus_client    = None
     collection_name  = None
@@ -817,7 +930,8 @@ def main(args: argparse.Namespace) -> None:
                 segments = json.load(f)
             captions = load_captions_by_index(segments, sample_data['scene_ids'])
 
-            video_context_text = generate_input_video_context(folder, sample_data, data_root)
+            # Tạo text ngữ cảnh video đầu vào (Tự động kích hoạt DPS toàn vẹn nếu mode là 'milvus')
+            video_context_text = generate_input_video_context(folder, sample_data, data_root, args.evidence_mode)
 
             reference_text = None
             reference_hits_record = []
@@ -836,6 +950,7 @@ def main(args: argparse.Namespace) -> None:
                     if rep_vec is None:
                         raise ValueError("Missing video representation (V_video) — required for reference retrieval.")
                     
+                    # Cross-Modal Self-Querying truy vấn sinh ra các bản ghi Reference được tích hợp DPS thu gọn nhánh cây cục bộ
                     ranked_top = retrieve_discourse_evidence(
                         rep_vec.squeeze().tolist(), sample_data.get('rst_links', []),
                         current_video_id=folder,
@@ -854,7 +969,7 @@ def main(args: argparse.Namespace) -> None:
             ]
 
             if current_idx == 1:
-                debug_dir = Path("debug_prompts_output")
+                debug_dir = Path("debug_dps_prompts_output")
                 debug_dir.mkdir(exist_ok=True)
                 
                 sys_file_path = debug_dir / f"exact_system_prompt_{evidence_mode}.txt"
@@ -953,43 +1068,41 @@ def main(args: argparse.Namespace) -> None:
 
 
 # ==========================================
-# 15. ENTRY POINT
+# 16. ENTRY POINT
 # ==========================================
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="VideoRAG Inference Pipeline — Cross-Modal Self-Querying (V_video) + "
-                    "Nuclearity-Weighted RAG, single merged reference-retrieval channel.",
+                    "Nuclearity-Weighted RAG with Discourse Path Serialization (DPS).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--data_root",         type=str, required=True)
     parser.add_argument("--split_file",        type=str, required=True)
     parser.add_argument("--checkpoint_path",   type=str, required=True)
     parser.add_argument("--evidence_mode",     type=str, default="milvus", choices=EVIDENCE_MODE_CHOICES,
-                        help="'none': không dùng reference library. 'milvus': Cross-Modal Self-Querying (V_video) "
-                             "→ Milvus dense search → Nuclearity-Weighted topology re-rank.")
+                        help="'none': Không dùng thư viện tham chiếu, giữ nguyên thứ tự video tuyến tính. "
+                             "'milvus': Kích hoạt DPS cho cả input video và reference videos tìm kiếm được qua Milvus.")
     parser.add_argument("--collection_name",   type=str, default=None,
-                        help="Milvus collection ở scene-level. Mặc định đọc biến môi trường MILVUS_COLLECTION_NAME.")
+                        help="Milvus collection. Mặc định đọc biến môi trường MILVUS_COLLECTION_NAME.")
     parser.add_argument("--video_reps_dir",    type=str, default=None,
-                        help="Thư mục chứa file video_representations.pt (V_video từ Cross-Modal Self-Querying). "
-                             "Bắt buộc khai báo khi evidence_mode='milvus'.")
+                        help="Thư mục chứa file video_representations.pt (Bắt buộc khi chọn mode 'milvus').")
     parser.add_argument("--model_name",        type=str, default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--model_type",        type=str, default="instruct", choices=["instruct", "thinking"],
-                        help="Loại mô hình: 'instruct' hoặc 'thinking'.")
+    parser.add_argument("--model_type",        type=str, default="instruct", choices=["instruct", "thinking"])
 
-    # --- Reference retrieval hyperparameters (Cross-Modal Self-Querying → NW-RAG) ---
+    # --- Hyperparameters cho mô hình tìm kiếm ---
     parser.add_argument("--top_k",             type=int, default=5, help="Số lượng video làm bằng chứng tham chiếu sau khi dedupe.")
-    parser.add_argument("--search_limit",      type=int, default=50, help="Số lượng scene thô truy vấn từ Milvus trong 1 lượt tìm kiếm bằng V_video.")
-    parser.add_argument("--alpha",             type=float, default=0.7, help="Trọng số blend: final = alpha*dense_sim + (1-alpha)*topology_sim. Mặc định 0.7.")
+    parser.add_argument("--search_limit",      type=int, default=50, help="Số lượng scene thô truy vấn ban đầu từ Milvus.")
+    parser.add_argument("--alpha",             type=float, default=0.7, help="Trọng số blend: alpha*dense_sim + (1-alpha)*topology_sim.")
 
     # --- Retrieval cache (precompute trên CPU, đọc lại khi chạy LLM trên GPU) ---
     parser.add_argument("--precompute_retrieval", action="store_true",
-                        help="Chỉ chạy retrieval (Cross-Modal Self-Querying + Nuclearity re-rank) cho toàn bộ video test, "
+                        help="Chỉ chạy retrieval (Cross-Modal Self-Querying + Nuclearity re-rank + DPS) cho toàn bộ video test, "
                              "lưu ra --retrieval_cache_path rồi thoát. KHÔNG load model LLM, chạy trên CPU "
                              "để tiết kiệm chi phí GPU.")
     parser.add_argument("--retrieval_cache_path", type=str, default=None,
                         help="Đường dẫn file .json lưu/đọc kết quả retrieval theo từng video "
-                             "(đặt trong folder indexing/, vd: .../indexing/retrieval_cache.json). "
+                             "(đặt trong folder indexing/, vd: .../indexing/retrieval_cache_dps.json). "
                              "Ghi khi --precompute_retrieval bật; đọc khi tắt (nếu file tồn tại).")
 
     args = parser.parse_args()
